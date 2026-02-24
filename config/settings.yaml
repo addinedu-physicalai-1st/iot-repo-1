@@ -1,0 +1,172 @@
+# ================================================================
+# Voice IoT Controller - Settings  v1.0
+# ================================================================
+# 수정일: 2026-02-22
+# v0.4 변경: whisper 섹션 → stt 섹션으로 통합
+#            Porcupine 웨이크 워드 설정 추가
+# v0.5 변경: mic_device 10 → 11 (pipewire, 검증 결과 기반)
+#            noise_reduction / noise_prop_decrease 추가
+# v0.6 변경: _KO_CORRECTIONS 한국어 오인식 교정 추가 (stt_engine)
+#            llm_engine _normalize_types 추가 (pin float→int)
+# v0.7 변경: STT model_size base → small (인식률 향상)
+#            STT beam_size 1 → 3
+#            STT cpu_threads 3 → 6
+#            LLM qwen2.5:1.5b → qwen2.5:7b
+#            LLM timeout 10 → 30
+# v0.8 변경: tts 블록 추가 (Kokoro 로컬 / ElevenLabs API)
+# v0.9 변경: tts.kokoro.voice af_heart → af_sarah
+#            lang en → en-us (espeak 호환)
+#            (voices.bin 영어 전용 버전 — af_heart 미포함 확인)
+# v1.0 변경: TTS provider kokoro → edge (Microsoft Edge TTS)
+#            한국어 목소리 ko-KR-SunHiNeural 적용
+#            tts.edge 블록 추가
+
+server:
+  host: "0.0.0.0"
+  tcp_port: 9000
+  ws_port: 8000
+  ws_path: "/ws"
+
+ollama:
+  host: "http://localhost:11434"
+  model: "exaone3.5:latest"
+  timeout: 30
+
+# ================================================================
+# TTS 설정
+# ================================================================
+tts:
+  # 사용할 TTS provider 선택
+  # "edge"        → Microsoft Edge TTS, 무료, 한국어 지원 ← 현재 사용
+  # "kokoro"      → 로컬 ONNX 추론, 무료, 한국어 미지원
+  # "elevenlabs"  → API 호출, 고품질, 유료
+  provider: "edge"
+
+  edge:
+    # 한국어 목소리
+    # ko-KR-SunHiNeural  ← 여성 (기본값)
+    # ko-KR-InJoonNeural ← 남성
+    voice: "ko-KR-SunHiNeural"
+    edge_rate: "+0%"      # 발화 속도: "+10%" 빠르게 / "-10%" 느리게
+    edge_volume: "+0%"    # 볼륨
+
+  kokoro:
+    model_path:  "models/kokoro-v0_19.onnx"
+    voices_path: "models/voices.bin"
+    voice: "af_sarah"
+    speed: 1.0
+    lang: "en-us"
+
+  elevenlabs:
+    api_key: ""
+    voice_id: ""
+    model_id: "eleven_multilingual_v2"
+
+# ================================================================
+# STT 설정
+# ================================================================
+stt:
+  model_size: "small"
+  language: "ko"
+  device: "cuda"
+  wake_word: "자비스야"
+  porcupine_access_key: "7MPG0u7YUocUco+HH+48cQDyxc0tHB38TqbP+mpKIljNIBZ9cKheIA=="
+  porcupine_model_path: "models/자비스야_ko_linux_v4_0_0.ppn"
+  porcupine_params_path: "models/porcupine_params_ko.pv"
+  mic_device: 11
+  vad_energy_threshold: 0.02
+  noise_reduction: false
+  noise_prop_decrease: 0.85
+  debug_mode: true
+
+# ================================================================
+# ESP32 디바이스 배치
+# ================================================================
+devices:
+
+  esp32_garage:
+    label: "차고"
+    caps: ["led", "servo"]
+    pins:
+      led:
+        - id: "led_garage_main"
+          gpio: 2
+          label: "차고 메인 조명"
+      servo:
+        - id: "servo_garage_door"
+          gpio: 18
+          label: "차고 문"
+          default_angle: 0
+
+  esp32_bathroom:
+    label: "욕실"
+    caps: ["led", "temp"]
+    pins:
+      led:
+        - id: "led_bathroom_main"
+          gpio: 2
+          label: "욕실 조명"
+      sensor:
+        - id: "temp_bathroom"
+          gpio: 15
+          type: "ds18b20"
+          label: "욕실 온도 센서"
+          interval_sec: 30
+
+  esp32_bedroom:
+    label: "침실"
+    caps: ["led", "dht22", "seg7", "servo"]
+    pins:
+      led:
+        - id: "led_bedroom_main"
+          gpio: 2
+          label: "침실 조명"
+      sensor:
+        - id: "dht22_bedroom"
+          gpio: 15
+          type: "dht22"
+          label: "침실 온습도 센서"
+          interval_sec: 10
+      seg7:
+        - id: "seg7_bedroom"
+          pin_clk: 22
+          pin_dio: 23
+          label: "침실 7세그먼트 (온도/습도 표시)"
+          default_mode: "temp"
+      servo:
+        - id: "servo_bedroom"
+          gpio: 18
+          label: "침실 서보모터"
+          default_angle: 0
+
+  esp32_entrance:
+    label: "현관"
+    caps: ["led", "servo"]
+    pins:
+      led:
+        - id: "led_entrance_main"
+          gpio: 2
+          label: "현관 조명"
+      servo:
+        - id: "servo_entrance_door"
+          gpio: 18
+          label: "현관 문"
+          default_angle: 0
+
+# ================================================================
+# LLM 명령 → device_id 매핑 키워드
+# ================================================================
+command_keywords:
+  차고:   "esp32_garage"
+  차고문:  "esp32_garage"
+  욕실:   "esp32_bathroom"
+  화장실:  "esp32_bathroom"
+  침실:   "esp32_bedroom"
+  방:     "esp32_bedroom"
+  현관:   "esp32_entrance"
+  현관문:  "esp32_entrance"
+
+seg7_mode_keywords:
+  온도:  "temp"
+  습도:  "humidity"
+  끄기:  "off"

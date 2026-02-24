@@ -1,0 +1,1 @@
+timestamp,command_text,wake_ms,stt_ms,llm_ms,tts_ms,total_ms,stt_model,llm_model,success

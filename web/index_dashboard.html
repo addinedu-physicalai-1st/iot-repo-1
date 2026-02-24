@@ -1,0 +1,2366 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice IoT Controller</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+/* ── 변수 ── */
+:root {
+  --bg0:     #050810;
+  --bg1:     #090d18;
+  --bg2:     #0d1220;
+  --bg3:     #111828;
+  --border:  rgba(0,200,255,0.12);
+  --cyan:    #00C8FF;
+  --cyan2:   #00E5FF;
+  --green:   #00FF88;
+  --yellow:  #FFB400;
+  --red:     #FF4060;
+  --purple:  #A060FF;
+  --text:    #C8E0F0;
+  --text2:   #5A7090;
+  --font-main: 'Rajdhani', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg0);
+  color: var(--text);
+  font-family: var(--font-main);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* 배경 그리드 */
+body::before {
+  content:'';
+  position:fixed; inset:0;
+  background-image:
+    linear-gradient(rgba(0,200,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,200,255,0.02) 1px, transparent 1px);
+  background-size:50px 50px;
+  pointer-events:none; z-index:0;
+}
+
+/* 스캔라인 오버레이 */
+body::after {
+  content:'';
+  position:fixed; inset:0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px
+  );
+  pointer-events:none; z-index:0;
+}
+
+/* ── 헤더 ── */
+header {
+  position:relative; z-index:10;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 32px;
+  border-bottom:1px solid var(--border);
+  background:rgba(5,8,16,0.9);
+  backdrop-filter:blur(12px);
+}
+
+.logo {
+  display:flex; align-items:center; gap:12px;
+}
+.logo-icon {
+  width:36px; height:36px;
+  border:2px solid var(--cyan);
+  border-radius:8px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:16px;
+  box-shadow:0 0 12px rgba(0,200,255,0.3);
+  animation: logo-pulse 3s ease-in-out infinite;
+}
+@keyframes logo-pulse {
+  0%,100%{box-shadow:0 0 12px rgba(0,200,255,0.3)}
+  50%{box-shadow:0 0 24px rgba(0,200,255,0.6)}
+}
+.logo-text {
+  font-size:1.3rem; font-weight:700; letter-spacing:0.1em;
+  color:#fff;
+}
+.logo-text span { color:var(--cyan); }
+
+.header-right {
+  display:flex; align-items:center; gap:20px;
+}
+.ws-status {
+  display:flex; align-items:center; gap:6px;
+  font-family:var(--font-mono); font-size:0.7rem;
+  color:var(--text2); letter-spacing:0.1em;
+}
+.ws-dot {
+  width:7px; height:7px; border-radius:50%;
+  background:var(--red);
+  transition:background 0.3s;
+}
+.ws-dot.connected { background:var(--green); box-shadow:0 0 6px var(--green); }
+
+/* ── 레이아웃 ── */
+.layout {
+  position:relative; z-index:1;
+  display:grid;
+  grid-template-columns:1fr 340px;
+  grid-template-rows:auto 1fr;
+  gap:16px;
+  padding:20px 24px;
+  max-width:1400px; margin:0 auto;
+  min-height:calc(100vh - 70px);
+}
+
+/* ── 음성 컨트롤 패널 (상단 전체) ── */
+.voice-panel {
+  grid-column:1 / -1;
+  background:var(--bg1);
+  border:1px solid var(--border);
+  border-top:2px solid var(--cyan);   /* 헤더 border-bottom 겹침 방지: top accent 선으로 대체 */
+  border-radius:14px;
+  padding:20px 32px;
+  display:flex; align-items:center; gap:32px;
+  box-shadow:0 2px 20px rgba(0,200,255,0.05);
+}
+
+/* 웨이크 워드 / 버튼 모드 뱃지 */
+.voice-mode-badge {
+  display:flex; align-items:center; gap:5px;
+  font-family:var(--font-mono); font-size:0.6rem;
+  letter-spacing:0.1em; color:var(--text2);
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:20px; padding:3px 10px;
+  flex-shrink:0; transition:all 0.3s;
+}
+.voice-mode-badge.wake-active {
+  color:var(--cyan); border-color:rgba(0,200,255,0.4);
+  box-shadow:0 0 8px rgba(0,200,255,0.2);
+}
+.voice-mode-badge.listening {
+  color:var(--green); border-color:rgba(0,255,136,0.4);
+  box-shadow:0 0 8px rgba(0,255,136,0.2);
+  animation: badge-blink 1s ease-in-out infinite;
+}
+@keyframes badge-blink {
+  0%,100%{opacity:1} 50%{opacity:0.5}
+}
+
+.mic-btn {
+  width:72px; height:72px; border-radius:50%;
+  background:var(--bg2);
+  border:2px solid var(--cyan);
+  cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  font-size:28px;
+  transition:all 0.2s;
+  flex-shrink:0;
+  position:relative;
+  box-shadow:0 0 20px rgba(0,200,255,0.15);
+}
+.mic-btn:hover { transform:scale(1.05); box-shadow:0 0 30px rgba(0,200,255,0.3); }
+.mic-btn.active {
+  background:rgba(0,200,255,0.15);
+  border-color:var(--cyan2);
+  box-shadow:0 0 40px rgba(0,200,255,0.5);
+  animation:mic-ring 1s ease-in-out infinite;
+}
+@keyframes mic-ring {
+  0%,100%{box-shadow:0 0 20px rgba(0,200,255,0.4),0 0 0 0 rgba(0,200,255,0.3)}
+  50%{box-shadow:0 0 40px rgba(0,200,255,0.6),0 0 0 12px rgba(0,200,255,0)}
+}
+
+.voice-info { flex:1; }
+.voice-label {
+  font-size:0.65rem; letter-spacing:0.2em;
+  color:var(--text2); text-transform:uppercase; margin-bottom:6px;
+}
+.voice-text {
+  font-size:1.4rem; font-weight:600; color:#fff;
+  min-height:34px; line-height:1.2;
+}
+.voice-text.placeholder { color:var(--text2); font-weight:400; font-size:1rem; }
+
+.voice-result {
+  font-family:var(--font-mono); font-size:0.72rem;
+  color:var(--cyan); margin-top:6px; min-height:18px;
+}
+
+/* 수동 입력 */
+.manual-input-wrap {
+  display:flex; gap:8px; align-items:center;
+  border-left:1px solid var(--border); padding-left:32px;
+  flex-shrink:0;
+}
+.manual-input {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:8px; padding:10px 14px;
+  color:var(--text); font-family:var(--font-main); font-size:0.95rem;
+  width:240px; outline:none;
+  transition:border-color 0.2s;
+}
+.manual-input:focus { border-color:var(--cyan); }
+.manual-input::placeholder { color:var(--text2); }
+.send-btn {
+  background:var(--cyan); color:#000;
+  border:none; border-radius:8px;
+  padding:10px 18px; cursor:pointer;
+  font-family:var(--font-main); font-weight:700; font-size:0.9rem;
+  letter-spacing:0.05em; transition:all 0.2s;
+  white-space:nowrap;
+}
+.send-btn:hover { background:var(--cyan2); transform:translateY(-1px); }
+
+/* ── 디바이스 그리드 (좌측) ── */
+.devices-section { display:flex; flex-direction:column; gap:14px; }
+
+.section-label {
+  font-size:0.65rem; letter-spacing:0.25em; color:var(--text2);
+  text-transform:uppercase; margin-bottom:2px;
+}
+
+.devices-grid {
+  display:grid; grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+
+/* ── 디바이스 카드 ── */
+.device-card {
+  background:var(--bg1);
+  border:1px solid var(--border);
+  border-radius:12px; padding:18px;
+  position:relative; overflow:hidden;
+  transition:border-color 0.3s, box-shadow 0.3s;
+}
+.device-card::before {
+  content:'';
+  position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg, transparent, var(--card-accent, var(--cyan)), transparent);
+  opacity:0.5;
+}
+.device-card.online { border-color:rgba(0,255,136,0.2); }
+.device-card.online::before { opacity:1; }
+
+.device-header {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:14px;
+}
+.device-name {
+  font-size:1rem; font-weight:700; letter-spacing:0.08em; color:#fff;
+}
+.device-badge {
+  font-family:var(--font-mono); font-size:0.6rem;
+  padding:2px 8px; border-radius:20px;
+  background:rgba(0,200,255,0.08);
+  color:var(--text2); border:1px solid var(--border);
+}
+.device-badge.online {
+  background:rgba(0,255,136,0.08);
+  color:var(--green); border-color:rgba(0,255,136,0.25);
+}
+
+/* 디바이스 제어 버튼들 */
+.ctrl-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+
+.ctrl-btn {
+  flex:1; min-width:60px;
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:6px; padding:9px 4px;
+  color:var(--text2); cursor:pointer;
+  font-family:var(--font-main); font-size:0.8rem; font-weight:600;
+  letter-spacing:0.05em; text-align:center;
+  transition:all 0.2s;
+  touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+}
+.ctrl-btn:hover { border-color:var(--cyan); color:var(--cyan); }
+.ctrl-btn.active {
+  background:rgba(0,200,255,0.12);
+  border-color:var(--cyan); color:var(--cyan);
+}
+.ctrl-btn.active-green {
+  background:rgba(0,255,136,0.1);
+  border-color:var(--green); color:var(--green);
+}
+
+/* 서보 슬라이더 */
+.servo-wrap { margin-top:8px; }
+.servo-label {
+  display:flex; justify-content:space-between;
+  font-size:0.7rem; color:var(--text2); margin-bottom:4px;
+  font-family:var(--font-mono);
+}
+.servo-slider {
+  width:100%; height:6px;
+  -webkit-appearance:none; appearance:none;
+  background:var(--bg2); border-radius:3px; outline:none;
+  border:1px solid var(--border);
+  cursor:pointer;
+}
+.servo-slider::-webkit-slider-thumb {
+  -webkit-appearance:none;
+  width:22px; height:22px; border-radius:50%;
+  background:var(--yellow); cursor:pointer;
+  box-shadow:0 0 8px rgba(255,180,0,0.6);
+}
+.servo-slider::-moz-range-thumb {
+  width:22px; height:22px; border-radius:50%;
+  background:var(--yellow); cursor:pointer; border:none;
+  box-shadow:0 0 8px rgba(255,180,0,0.6);
+}
+
+/* 센서 표시 */
+.sensor-row {
+  display:flex; gap:8px; margin-top:10px;
+}
+.sensor-chip {
+  flex:1; background:var(--bg2); border:1px solid var(--border);
+  border-radius:6px; padding:6px 8px; text-align:center;
+}
+.sensor-val {
+  font-family:var(--font-mono); font-size:1rem;
+  font-weight:700; color:var(--cyan);
+}
+.sensor-unit {
+  font-size:0.6rem; color:var(--text2); display:block;
+  letter-spacing:0.1em; margin-top:1px;
+}
+
+/* 7세그먼트 디스플레이 (침실) */
+.seg7-display {
+  background:#000; border:1px solid rgba(255,180,0,0.2);
+  border-radius:6px; padding:8px 12px;
+  text-align:center; margin-top:8px;
+  font-family:var(--font-mono); font-size:1.6rem;
+  color:var(--yellow); letter-spacing:0.15em;
+  text-shadow:0 0 8px rgba(255,180,0,0.7);
+  min-height:44px; display:flex; align-items:center; justify-content:center;
+}
+.seg7-display.seg7-active {
+  color: var(--cyan);
+  text-shadow: 0 0 12px rgba(0,200,255,0.8);
+  transition: color 0.3s, text-shadow 0.3s;
+}
+.seg7-mode-btns { display:flex; gap:4px; margin-top:6px; }
+.seg7-mode-btn {
+  flex:1; background:var(--bg2); border:1px solid var(--border);
+  border-radius:4px; padding:4px;
+  color:var(--text2); cursor:pointer;
+  font-size:0.7rem; font-weight:600; text-align:center;
+  transition:all 0.2s;
+}
+.seg7-mode-btn:hover, .seg7-mode-btn.active {
+  background:rgba(255,180,0,0.1);
+  border-color:var(--yellow); color:var(--yellow);
+}
+
+/* ── 우측 패널 ── */
+.side-panel {
+  display:flex; flex-direction:column; gap:14px;
+}
+
+/* 로그 패널 */
+.log-panel {
+  background:var(--bg1); border:1px solid var(--border);
+  border-radius:12px; padding:16px;
+  flex:1; display:flex; flex-direction:column;
+}
+.log-header {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:10px;
+}
+.log-clear {
+  font-family:var(--font-mono); font-size:0.6rem;
+  color:var(--text2); cursor:pointer; letter-spacing:0.1em;
+  transition:color 0.2s;
+}
+.log-clear:hover { color:var(--red); }
+.log-list {
+  flex:1; overflow-y:auto; max-height:300px;
+  display:flex; flex-direction:column; gap:4px;
+}
+.log-list::-webkit-scrollbar { width:3px; }
+.log-list::-webkit-scrollbar-track { background:transparent; }
+.log-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+.log-item {
+  display:flex; gap:8px; align-items:flex-start;
+  font-family:var(--font-mono); font-size:0.65rem;
+  padding:4px 8px; border-radius:4px;
+  background:rgba(255,255,255,0.02);
+  animation:log-in 0.2s ease;
+}
+@keyframes log-in {
+  from{opacity:0;transform:translateX(-4px)}
+  to{opacity:1;transform:translateX(0)}
+}
+.log-time { color:var(--text2); flex-shrink:0; }
+.log-msg  { color:var(--text); flex:1; line-height:1.4; }
+.log-item.ok   .log-msg { color:var(--green); }
+.log-item.fail .log-msg { color:var(--red); }
+.log-item.info .log-msg { color:var(--cyan); }
+.log-item.warn .log-msg { color:var(--yellow); }
+
+/* 센서 차트 */
+.chart-panel {
+  background:var(--bg1); border:1px solid var(--border);
+  border-radius:12px; padding:16px;
+}
+.chart-wrap { position:relative; height:160px; margin-top:10px; }
+
+/* ── 하단 상태바 ── */
+.status-bar {
+  position:fixed; bottom:0; left:0; right:0; z-index:10;
+  background:rgba(5,8,16,0.95); backdrop-filter:blur(12px);
+  border-top:1px solid var(--border);
+  display:flex; align-items:center; gap:24px;
+  padding:8px 24px;
+  font-family:var(--font-mono); font-size:0.65rem; color:var(--text2);
+}
+.status-item { display:flex; align-items:center; gap:5px; }
+.status-dot { width:5px; height:5px; border-radius:50%; }
+
+/* ── 디바이스 상태 표시 ── */
+.device-status-row {
+  display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;
+}
+.status-badge {
+  flex:1; min-width:80px;
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:6px; padding:6px 8px;
+  text-align:center;
+  font-family:var(--font-mono); font-size:0.72rem;
+  letter-spacing:0.05em;
+  transition:all 0.3s;
+}
+.status-badge .status-label {
+  font-size:0.58rem; color:var(--text2);
+  display:block; margin-bottom:2px; letter-spacing:0.1em;
+}
+.status-badge .status-val {
+  font-family:var(--font-mono);
+  font-size:1rem; font-weight:700; color:var(--text2);
+  display:block; margin-top:2px;
+  letter-spacing:0.05em;
+}
+.status-badge.on  { border-color:rgba(0,255,136,0.35); background:rgba(0,255,136,0.06); }
+.status-badge.on  .status-val { color:var(--green); text-shadow:0 0 8px rgba(0,255,136,0.5); }
+.status-badge.off { border-color:rgba(255,64,96,0.3); background:rgba(255,64,96,0.05); }
+.status-badge.off .status-val { color:var(--red); }
+.status-badge.open { border-color:rgba(0,255,136,0.35); background:rgba(0,255,136,0.06); }
+.status-badge.open   .status-val { color:var(--green); text-shadow:0 0 8px rgba(0,255,136,0.5); }
+.status-badge.closed { border-color:rgba(255,64,96,0.3); background:rgba(255,64,96,0.05); }
+.status-badge.closed .status-val { color:var(--red); }
+
+/* ── 뮤직 플레이어 ── */
+.music-player {
+  margin-top:10px;
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:8px; padding:10px 12px;
+}
+.music-track-info {
+  display:flex; align-items:center; gap:8px; margin-bottom:8px;
+}
+.music-disc {
+  width:32px; height:32px; border-radius:50%;
+  background:linear-gradient(135deg, var(--purple), var(--cyan));
+  display:flex; align-items:center; justify-content:center;
+  font-size:14px; flex-shrink:0;
+}
+.music-disc.playing { animation: disc-spin 4s linear infinite; }
+@keyframes disc-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.music-title {
+  flex:1; font-size:0.72rem; color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  font-family:var(--font-mono);
+}
+.music-title .track-name  { color:#fff; font-weight:700; display:block; }
+.music-title .track-genre { color:var(--text2); font-size:0.62rem; }
+
+.music-progress-wrap { margin-bottom:8px; }
+.music-progress {
+  width:100%; height:4px;
+  -webkit-appearance:none; appearance:none;
+  background:var(--bg3); border-radius:2px; outline:none; cursor:pointer;
+}
+.music-progress::-webkit-slider-thumb {
+  -webkit-appearance:none;
+  width:12px; height:12px; border-radius:50%;
+  background:var(--purple); cursor:pointer;
+}
+.music-time {
+  display:flex; justify-content:space-between;
+  font-family:var(--font-mono); font-size:0.58rem; color:var(--text2);
+  margin-top:3px;
+}
+.music-controls { display:flex; align-items:center; gap:6px; }
+.music-btn {
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:6px; padding:6px 10px;
+  color:var(--text2); cursor:pointer;
+  font-size:0.8rem; transition:all 0.2s;
+  display:flex; align-items:center; justify-content:center;
+}
+.music-btn:hover { border-color:var(--purple); color:var(--purple); }
+.music-btn.play-btn {
+  flex:1; background:rgba(160,96,255,0.1);
+  border-color:rgba(160,96,255,0.3); color:var(--purple);
+  font-weight:700; font-size:0.85rem; gap:4px;
+}
+.music-btn.play-btn.playing {
+  background:rgba(160,96,255,0.2); border-color:var(--purple);
+  box-shadow:0 0 10px rgba(160,96,255,0.3);
+}
+.music-volume { display:flex; align-items:center; gap:6px; margin-top:8px; }
+.music-vol-label { font-size:0.62rem; color:var(--text2); font-family:var(--font-mono); flex-shrink:0; }
+.music-vol-slider {
+  flex:1; height:4px;
+  -webkit-appearance:none; appearance:none;
+  background:var(--bg3); border-radius:2px; outline:none; cursor:pointer;
+}
+.music-vol-slider::-webkit-slider-thumb {
+  -webkit-appearance:none;
+  width:12px; height:12px; border-radius:50%;
+  background:var(--purple); cursor:pointer;
+}
+
+/* ── 거실 카드 accent ── */
+#card-living { --card-accent:#A060FF; }
+
+/* ── PIR 보안 카드 ── */
+#card-pir { --card-accent:#FF4060; }
+
+.pir-mode-grid {
+  display:grid; grid-template-columns:repeat(4,1fr);
+  gap:8px; margin-bottom:12px;
+}
+.pir-mode-btn {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:8px; padding:10px 6px;
+  color:var(--text2); cursor:pointer;
+  font-family:var(--font-main); font-size:0.8rem; font-weight:600;
+  letter-spacing:0.03em; text-align:center;
+  transition:all 0.2s;
+  touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+  display:flex; flex-direction:column; align-items:center; gap:4px;
+}
+.pir-mode-btn .pir-icon { font-size:1.2rem; }
+.pir-mode-btn:hover { border-color:var(--red); color:var(--red); }
+.pir-mode-btn.active-away {
+  background:rgba(255,64,96,0.12);
+  border-color:var(--red); color:var(--red);
+  box-shadow:0 0 10px rgba(255,64,96,0.2);
+}
+.pir-mode-btn.active-home {
+  background:rgba(0,255,136,0.1);
+  border-color:var(--green); color:var(--green);
+  box-shadow:0 0 10px rgba(0,255,136,0.2);
+}
+.pir-mode-btn.active-sleep {
+  background:rgba(160,96,255,0.1);
+  border-color:var(--purple); color:var(--purple);
+  box-shadow:0 0 10px rgba(160,96,255,0.2);
+}
+.pir-mode-btn.active-wake {
+  background:rgba(255,180,0,0.1);
+  border-color:var(--yellow); color:var(--yellow);
+  box-shadow:0 0 10px rgba(255,180,0,0.2);
+}
+
+.pir-status-bar {
+  display:flex; align-items:center; gap:10px;
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:8px; padding:10px 14px;
+}
+.pir-status-dot {
+  width:10px; height:10px; border-radius:50%;
+  background:var(--text2); flex-shrink:0;
+  transition:all 0.4s;
+}
+.pir-status-dot.guard  { background:var(--red);    box-shadow:0 0 8px var(--red);    animation:pir-blink 1.5s ease-in-out infinite; }
+.pir-status-dot.presence { background:var(--green);  box-shadow:0 0 8px var(--green);  }
+.pir-status-dot.off    { background:var(--text2); box-shadow:none; animation:none; }
+@keyframes pir-blink {
+  0%,100%{opacity:1} 50%{opacity:0.3}
+}
+.pir-status-text {
+  font-family:var(--font-mono); font-size:0.72rem;
+  color:var(--text2); flex:1;
+}
+.pir-alert-badge {
+  font-family:var(--font-mono); font-size:0.62rem;
+  padding:2px 8px; border-radius:20px;
+  background:rgba(255,64,96,0.08);
+  color:var(--text2); border:1px solid var(--border);
+  transition:all 0.3s;
+}
+.pir-alert-badge.alert {
+  background:rgba(255,64,96,0.15);
+  color:var(--red); border-color:rgba(255,64,96,0.4);
+  animation:badge-blink 1s ease-in-out infinite;
+}
+
+/* ── 애니메이션 ── */
+@keyframes fadeUp {
+  from{opacity:0;transform:translateY(12px)}
+  to{opacity:1;transform:translateY(0)}
+}
+.device-card { animation:fadeUp 0.4s ease both; }
+.device-card:nth-child(1){animation-delay:.05s}
+.device-card:nth-child(2){animation-delay:.1s}
+.device-card:nth-child(3){animation-delay:.15s}
+.device-card:nth-child(4){animation-delay:.2s}
+
+/* ── 3열 제어행 (상태뱃지 + 버튼2) ── */
+.ctrl-row-3 {
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  gap:6px; margin-bottom:8px;
+}
+.ctrl-row-3 .status-badge { margin:0; min-width:unset; }
+.ctrl-row-3 .ctrl-btn { margin:0; }
+
+/* ── 온도 칩 ── */
+.temp-row { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px; margin-bottom:8px; }
+.temp-chip {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:6px; padding:6px 8px; text-align:center;
+}
+.temp-chip .tc-label { font-size:0.58rem; color:var(--text2); display:block; letter-spacing:0.1em; margin-bottom:2px; }
+.temp-chip .tc-val   { font-family:var(--font-mono); font-size:1rem; font-weight:700; color:var(--cyan); }
+.temp-chip .tc-unit  { font-size:0.62rem; color:var(--text2); }
+
+/* ── 희망온도 컨트롤 ── */
+.target-temp-wrap {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:6px; padding:8px 10px; margin-top:6px;
+}
+.target-temp-label {
+  font-size:0.58rem; color:var(--text2);
+  letter-spacing:0.1em; display:block; margin-bottom:6px;
+}
+.target-temp-ctrl {
+  display:flex; align-items:center; gap:6px;
+}
+.target-temp-ctrl .tc-adj {
+  width:40px; height:40px; border-radius:6px;
+  background:var(--bg3); border:1px solid var(--border);
+  color:var(--text); font-size:1.2rem; font-weight:700;
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+  transition:all 0.15s; flex-shrink:0;
+  touch-action:manipulation;
+}
+.target-temp-ctrl .tc-adj:hover { border-color:var(--cyan); color:var(--cyan); }
+.target-temp-ctrl .tc-input {
+  flex:1; background:var(--bg3); border:1px solid var(--border);
+  border-radius:4px; padding:4px 6px; text-align:center;
+  font-family:var(--font-mono); font-size:1rem; font-weight:700;
+  color:var(--yellow); outline:none; width:60px;
+}
+.target-temp-ctrl .tc-input:focus { border-color:var(--yellow); }
+.target-temp-ctrl .tc-apply {
+  background:var(--cyan); color:#000;
+  border:none; border-radius:4px; padding:4px 10px;
+  font-family:var(--font-main); font-weight:700; font-size:0.78rem;
+  cursor:pointer; transition:all 0.15s; white-space:nowrap;
+}
+.target-temp-ctrl .tc-apply:hover { background:var(--cyan2); }
+
+/* ══════════════════════════════════════════
+   모바일 반응형 (768px 이하)
+══════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* 헤더 */
+  header { padding:12px 16px; }
+  .logo-text { font-size:1rem; }
+
+  /* 레이아웃: 1열 세로 스택 */
+  .layout {
+    grid-template-columns:1fr;
+    grid-template-rows:auto;
+    padding:12px 12px 80px;
+    gap:12px;
+  }
+
+  /* 음성 패널: 세로로 */
+  .voice-panel {
+    flex-direction:column; gap:14px;
+    padding:16px;
+  }
+  .manual-input-wrap {
+    border-left:none; border-top:1px solid var(--border);
+    padding-left:0; padding-top:14px;
+    width:100%;
+  }
+  .manual-input { width:100%; }
+
+  /* 디바이스 그리드: 1열 */
+  .devices-grid { grid-template-columns:1fr; }
+
+  /* ctrl-row-3: 모바일에서 상태뱃지 위, 버튼 아래 2열 */
+  .ctrl-row-3 {
+    grid-template-columns:1fr 1fr;
+    grid-template-rows:auto auto;
+  }
+  .ctrl-row-3 .status-badge {
+    grid-column:1 / -1;
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 12px;
+  }
+  .ctrl-row-3 .status-badge .status-label { margin-bottom:0; }
+  .ctrl-row-3 .status-badge .status-val   { font-size:1.1rem; }
+
+  /* 버튼 패딩 크게 */
+  .ctrl-btn { padding:11px 4px; font-size:0.85rem; }
+
+  /* 희망온도 입력 */
+  .target-temp-ctrl .tc-input { font-size:1.1rem; }
+  .target-temp-ctrl .tc-apply { padding:6px 14px; font-size:0.85rem; }
+
+  /* 사이드 패널: 아래로 */
+  .side-panel { flex-direction:column; }
+  .chart-wrap { height:140px; }
+  .log-list   { max-height:200px; }
+
+  /* 하단 상태바 */
+  .status-bar { gap:12px; padding:8px 14px; font-size:0.6rem; }
+}
+
+/* 소형 모바일 (480px 이하) */
+@media (max-width: 480px) {
+  .logo-text { display:none; }
+  .device-name { font-size:0.95rem; }
+  .voice-text  { font-size:1.1rem; }
+}
+
+/* ── CCTV 모달 ── */
+.cctv-modal-overlay {
+  display:none;
+  position:fixed; inset:0; z-index:100;
+  background:rgba(0,0,0,0.85);
+  backdrop-filter:blur(6px);
+  align-items:center; justify-content:center;
+}
+.cctv-modal-overlay.show { display:flex; animation:fadeUp 0.25s ease; }
+
+.cctv-modal {
+  background:var(--bg1);
+  border:1px solid rgba(255,64,96,0.4);
+  border-top:3px solid var(--red);
+  border-radius:16px;
+  padding:24px;
+  width:min(680px, 95vw);
+  box-shadow:0 0 40px rgba(255,64,96,0.2);
+}
+.cctv-modal-header {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:16px;
+}
+.cctv-modal-title {
+  font-size:1.1rem; font-weight:700; color:var(--red);
+  letter-spacing:0.08em; display:flex; align-items:center; gap:8px;
+}
+.cctv-modal-time {
+  font-family:var(--font-mono); font-size:0.65rem; color:var(--text2);
+}
+.cctv-feed {
+  width:100%; aspect-ratio:16/9;
+  background:#000; border-radius:8px;
+  border:1px solid var(--border);
+  overflow:hidden; position:relative;
+  display:flex; align-items:center; justify-content:center;
+}
+.cctv-feed img {
+  width:100%; height:100%; object-fit:cover;
+  display:block;
+}
+.cctv-feed-error {
+  font-family:var(--font-mono); font-size:0.75rem;
+  color:var(--text2); text-align:center;
+  display:none; flex-direction:column; align-items:center; gap:8px;
+}
+.cctv-feed-error.show { display:flex; }
+.cctv-modal-msg {
+  font-family:var(--font-mono); font-size:0.75rem;
+  color:var(--red); margin:12px 0 16px;
+  background:rgba(255,64,96,0.06);
+  border:1px solid rgba(255,64,96,0.2);
+  border-radius:6px; padding:8px 12px;
+}
+.cctv-modal-actions {
+  display:flex; gap:10px;
+}
+.cctv-btn-dismiss {
+  flex:1; background:rgba(0,255,136,0.1);
+  border:1px solid rgba(0,255,136,0.3);
+  border-radius:8px; padding:10px;
+  color:var(--green); cursor:pointer;
+  font-family:var(--font-main); font-weight:700; font-size:0.9rem;
+  transition:all 0.2s;
+}
+.cctv-btn-dismiss:hover { background:rgba(0,255,136,0.2); }
+.cctv-btn-close {
+  background:rgba(255,64,96,0.1);
+  border:1px solid rgba(255,64,96,0.3);
+  border-radius:8px; padding:10px 16px;
+  color:var(--red); cursor:pointer;
+  font-family:var(--font-main); font-weight:700; font-size:0.9rem;
+  transition:all 0.2s;
+}
+.cctv-btn-close:hover { background:rgba(255,64,96,0.2); }
+</style>
+</head>
+<body>
+
+<!-- 헤더 -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div class="logo-text">Voice <span>IoT</span> Controller</div>
+  </div>
+  <div class="header-right">
+    <div class="ws-status">
+      <div class="ws-dot" id="wsDot"></div>
+      <span id="wsLabel">WS 연결 중...</span>
+    </div>
+  </div>
+</header>
+
+<!-- 메인 레이아웃 -->
+<div class="layout">
+
+  <!-- 음성 컨트롤 패널 -->
+  <div class="voice-panel">
+    <button class="mic-btn" id="micBtn" title="클릭: 브라우저 STT + 서버 STT 동시 활성화">🎙️</button>
+    <div class="voice-info">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <div class="voice-label" style="margin:0;">VOICE COMMAND</div>
+        <div class="voice-mode-badge" id="modeBadge">⬤ IDLE</div>
+      </div>
+      <div class="voice-text placeholder" id="voiceText">버튼을 누르거나 "자비스야"라고 말하세요</div>
+      <div class="voice-result" id="voiceResult"></div>
+    </div>
+    <div class="manual-input-wrap">
+      <input class="manual-input" id="manualInput" placeholder="수동 명령 입력 (예: 침실 불 켜줘)" />
+      <button class="send-btn" id="sendBtn">전송 ▶</button>
+    </div>
+  </div>
+
+  <!-- 디바이스 섹션 -->
+  <div class="devices-section">
+    <div class="section-label">ESP32 DEVICES</div>
+    <div class="devices-grid">
+
+      <!-- 차고 -->
+      <div class="device-card" id="card-garage" style="--card-accent:#FFB400;">
+        <div class="device-header">
+          <div class="device-name">차고</div>
+          <div class="device-badge" id="badge-garage">OFFLINE</div>
+        </div>
+        <div class="ctrl-row-3">
+          <div class="status-badge off" id="status-garage-led">
+            <span class="status-label">전등</span>
+            <span class="status-val" id="val-garage-led">OFF</span>
+          </div>
+          <button class="ctrl-btn" onclick="sendLed('garage',2,'on')">전등 켜기</button>
+          <button class="ctrl-btn" onclick="sendLed('garage',2,'off')">전등 끄기</button>
+        </div>
+        <div class="ctrl-row-3">
+          <div class="status-badge closed" id="status-garage-door">
+            <span class="status-label">차고문</span>
+            <span class="status-val" id="val-garage-door">닫힘</span>
+          </div>
+          <button class="ctrl-btn" onclick="sendDoor('garage',90)">차고문 열기</button>
+          <button class="ctrl-btn" onclick="sendDoor('garage',0)">차고문 닫기</button>
+        </div>
+        <div class="servo-wrap">
+          <div class="servo-label"><span>차고문 각도</span><span id="servo-garage-val">0°</span></div>
+          <input class="servo-slider" type="range" min="0" max="180" value="0"
+            oninput="document.getElementById('servo-garage-val').textContent=this.value+'°'"
+            onchange="sendDoor('garage',parseInt(this.value))">
+        </div>
+      </div>
+
+      <!-- 욕실 -->
+      <div class="device-card" id="card-living" style="--card-accent:#A060FF;">
+        <div class="device-header">
+          <div class="device-name">거실</div>
+          <div class="device-badge" id="badge-living">LOCAL</div>
+        </div>
+        <!-- 전등 제어 -->
+        <div class="ctrl-row-3" style="margin-bottom:10px;">
+          <div class="status-badge off" id="status-living-led">
+            <span class="status-label">전등</span>
+            <span class="status-val" id="val-living-led">OFF</span>
+          </div>
+          <button class="ctrl-btn" onclick="sendLed('living',2,'on')">전등 켜기</button>
+          <button class="ctrl-btn" onclick="sendLed('living',2,'off')">전등 끄기</button>
+        </div>
+        <!-- 뮤직 플레이어 -->
+        <div class="music-player">
+          <div class="music-track-info">
+            <div class="music-disc" id="musicDisc">🎵</div>
+            <div class="music-title">
+              <span class="track-name" id="trackName">재생 대기 중...</span>
+              <span class="track-genre" id="trackGenre">Lo-fi / Ambient</span>
+            </div>
+            <span style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text2);" id="trackNum">0 / 0</span>
+          </div>
+          <div class="music-progress-wrap">
+            <input class="music-progress" type="range" id="musicProgress" min="0" max="100" value="0"
+              oninput="seekMusic(this.value)">
+            <div class="music-time">
+              <span id="musicCurrent">0:00</span>
+              <span id="musicDuration">0:00</span>
+            </div>
+          </div>
+          <div class="music-controls">
+            <button class="music-btn" onclick="prevTrack()" title="이전 곡">⏮</button>
+            <button class="music-btn play-btn" id="playBtn" onclick="toggleMusic()">
+              ▶ &nbsp;재생
+            </button>
+            <button class="music-btn" onclick="nextTrack()" title="다음 곡">⏭</button>
+          </div>
+          <div class="music-volume">
+            <span class="music-vol-label">🔊 VOL</span>
+            <input class="music-vol-slider" type="range" id="volSlider" min="0" max="100" value="60"
+              oninput="setVolume(this.value)">
+            <span style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text2);width:28px;" id="volVal">60%</span>
+          </div>
+        </div>
+        <!-- YouTube IFrame 플레이어 (숨김) -->
+        <div id="ytPlayerEl" style="visibility:hidden;position:absolute;width:1px;height:1px;"></div>
+      </div>
+
+      <!-- 침실 -->
+      <div class="device-card" id="card-bedroom" style="--card-accent:#A060FF;">
+        <div class="device-header">
+          <div class="device-name">침실</div>
+          <div class="device-badge" id="badge-bedroom">OFFLINE</div>
+        </div>
+        <div class="ctrl-row-3">
+          <div class="status-badge off" id="status-bedroom-led">
+            <span class="status-label">전등</span>
+            <span class="status-val" id="val-bedroom-led">OFF</span>
+          </div>
+          <button class="ctrl-btn" onclick="sendLed('bedroom',2,'on')">전등 켜기</button>
+          <button class="ctrl-btn" onclick="sendLed('bedroom',2,'off')">전등 끄기</button>
+        </div>
+        <div class="ctrl-row-3">
+          <div class="status-badge closed" id="status-bedroom-curtain">
+            <span class="status-label">커튼</span>
+            <span class="status-val" id="val-bedroom-curtain">닫힘</span>
+          </div>
+          <button class="ctrl-btn" onclick="sendCurtain(90)">커튼 열기</button>
+          <button class="ctrl-btn" onclick="sendCurtain(0)">커튼 닫기</button>
+        </div>
+        <div class="servo-wrap">
+          <div class="servo-label"><span>커튼 각도 &nbsp;(0°=닫힘 / 90°=열림)</span><span id="servo-bedroom-val">0°</span></div>
+          <input class="servo-slider" type="range" min="0" max="90" value="0"
+            oninput="document.getElementById('servo-bedroom-val').textContent=this.value+'°'"
+            onchange="sendCurtain(parseInt(this.value))">
+        </div>
+      </div>
+
+      <!-- 현관 -->
+      <div class="device-card" id="card-entrance" style="--card-accent:#00FF88;">
+        <div class="device-header">
+          <div class="device-name">현관</div>
+          <div class="device-badge" id="badge-entrance">OFFLINE</div>
+        </div>
+        <div class="ctrl-row-3">
+          <div class="status-badge off" id="status-entrance-led">
+            <span class="status-label">전등</span>
+            <span class="status-val" id="val-entrance-led">OFF</span>
+          </div>
+          <button class="ctrl-btn" onclick="sendLed('entrance',2,'on')">전등 켜기</button>
+          <button class="ctrl-btn" onclick="sendLed('entrance',2,'off')">전등 끄기</button>
+        </div>
+        <div class="ctrl-row-3">
+          <div class="status-badge closed" id="status-entrance-door">
+            <span class="status-label">현관문</span>
+            <span class="status-val" id="val-entrance-door">닫힘</span>
+          </div>
+          <button class="ctrl-btn" onclick="sendDoor('entrance',90)">현관문 열기</button>
+          <button class="ctrl-btn" onclick="sendDoor('entrance',0)">현관문 닫기</button>
+        </div>
+        <div class="servo-wrap">
+          <div class="servo-label"><span>현관문 각도</span><span id="servo-entrance-val">0°</span></div>
+          <input class="servo-slider" type="range" min="0" max="180" value="0"
+            oninput="document.getElementById('servo-entrance-val').textContent=this.value+'°'"
+            onchange="sendDoor('entrance',parseInt(this.value))">
+        </div>
+      </div>
+
+      <!-- 거실 -->
+      <div class="device-card" id="card-bathroom" style="--card-accent:#00C8FF; grid-column:1/-1;">
+        <div class="device-header">
+          <div class="device-name">욕실</div>
+          <div class="device-badge" id="badge-bathroom">OFFLINE</div>
+        </div>
+        <div class="ctrl-row-3">
+          <div class="status-badge off" id="status-bathroom-led">
+            <span class="status-label">전등</span>
+            <span class="status-val" id="val-bathroom-led">OFF</span>
+          </div>
+          <button class="ctrl-btn" onclick="sendLed('bathroom',2,'on')">전등 켜기</button>
+          <button class="ctrl-btn" onclick="sendLed('bathroom',2,'off')">전등 끄기</button>
+        </div>
+        <div class="target-temp-wrap">
+          <span class="target-temp-label">희망 온도 설정
+            <span id="bathroom-temp-set-badge" style="display:none; margin-left:8px; padding:2px 8px; border-radius:10px; background:rgba(0,200,255,0.15); border:1px solid var(--cyan); color:var(--cyan); font-size:0.8rem; font-family:var(--font-mono);">설정 --°C</span>
+          </span>
+          <div class="target-temp-ctrl">
+            <button class="tc-adj" onclick="adjustTarget('bathroom',-1)">−</button>
+            <input class="tc-input" id="target-bathroom" type="number" value="24" min="10" max="40" step="0.5"
+              onchange="applyTarget('bathroom')">
+            <button class="tc-adj" onclick="adjustTarget('bathroom',1)">+</button>
+            <span class="tc-unit" style="margin:0 2px;">°C</span>
+            <button class="tc-apply" onclick="applyTarget('bathroom')">적용</button>
+          </div>
+        </div>
+        <div class="seg7-display" id="seg7-display">- - . -</div>
+        <div class="seg7-mode-btns">
+          <button class="seg7-mode-btn active" id="seg7-temp"
+            onclick="setSeg7Mode('temp')">온도</button>
+          <button class="seg7-mode-btn" id="seg7-off"
+            onclick="sendCmd({cmd:'seg7',pin_clk:22,pin_dio:23,mode:'off',device_id:'esp32_home',room:'bathroom'})">OFF</button>
+        </div>
+      </div>
+
+    </div><!-- /devices-grid -->
+
+      <!-- PIR 보안 모드 -->
+      <div class="device-card" id="card-pir" style="--card-accent:#FF4060; margin-top:0;">
+        <div class="device-header">
+          <div class="device-name">🔒 보안 모드 (PIR)</div>
+          <div class="pir-alert-badge" id="pir-alert-badge">대기 중</div>
+        </div>
+        <div class="pir-mode-grid">
+          <button class="pir-mode-btn" id="pir-btn-away" onclick="setPirMode('away_mode')">
+            <span class="pir-icon">🚶</span>외출
+          </button>
+          <button class="pir-mode-btn" id="pir-btn-home" onclick="setPirMode('home_mode')">
+            <span class="pir-icon">🏠</span>귀가
+          </button>
+          <button class="pir-mode-btn" id="pir-btn-sleep" onclick="setPirMode('sleep_mode')">
+            <span class="pir-icon">🌙</span>취침
+          </button>
+          <button class="pir-mode-btn" id="pir-btn-wake" onclick="setPirMode('wake_mode')">
+            <span class="pir-icon">☀️</span>기상
+          </button>
+        </div>
+        <div class="pir-status-bar">
+          <div class="pir-status-dot off" id="pir-status-dot"></div>
+          <span class="pir-status-text" id="pir-status-text">PIR 비활성 — 모드를 선택하세요</span>
+        </div>
+      </div>
+
+  </div><!-- /devices-section -->
+  <div class="side-panel">
+
+    <!-- HOUSE MAP -->
+    <div class="section-label">HOUSE MAP</div>
+    <div class="chart-panel" style="padding:10px;">
+      <canvas id="houseCanvas" width="308" height="320" style="width:100%;border-radius:4px;cursor:default;display:block;"></canvas>
+    </div>
+
+    <!-- 로그 패널 -->
+    <div class="log-panel">
+      <div class="log-header">
+        <div class="section-label" style="margin:0;">COMMAND LOG</div>
+        <span class="log-clear" onclick="clearLog()">CLEAR</span>
+      </div>
+      <div class="log-list" id="logList"></div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- CCTV 보안 모달 -->
+<div class="cctv-modal-overlay" id="cctvModal">
+  <div class="cctv-modal">
+    <div class="cctv-modal-header">
+      <div class="cctv-modal-title">
+        🚨 보안 경고 — 움직임 감지
+      </div>
+      <span class="cctv-modal-time" id="cctvAlertTime">--:--:--</span>
+    </div>
+    <div class="cctv-feed" id="cctvFeed">
+      <img id="cctvImg" src="/camera/stream" alt="CCTV"
+        onerror="showCctvError()" onload="hideCctvError()">
+      <div class="cctv-feed-error" id="cctvError">
+        <span style="font-size:2rem;">📷</span>
+        <span>카메라 스트림 연결 실패</span>
+        <span style="color:var(--text2);font-size:0.65rem;">/camera/stream 엔드포인트 확인</span>
+      </div>
+    </div>
+    <div class="cctv-modal-msg" id="cctvAlertMsg">이상 움직임이 감지되었습니다.</div>
+    <div class="cctv-modal-actions">
+      <button class="cctv-btn-dismiss" onclick="dismissAlert()">✅ 확인 — 해제</button>
+      <button class="cctv-btn-close" onclick="closeCctvModal()">✕ 닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 하단 상태바 -->
+<div class="status-bar" style="padding-bottom:calc(8px + env(safe-area-inset-bottom));">
+  <div class="status-item">
+    <div class="status-dot" id="tcpDot" style="background:var(--red);"></div>
+    <span id="tcpLabel">TCP: 0 devices</span>
+  </div>
+  <div class="status-item">
+    <div class="status-dot" style="background:var(--cyan);box-shadow:0 0 4px var(--cyan);"></div>
+    <span>SERVER: 0.0.0.0:8000</span>
+  </div>
+  <div class="status-item" style="margin-left:auto;">
+    <span id="lastUpdate">--</span>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════
+// WebSocket
+// ════════════════════════════════════════════
+const WS_URL = `ws://${location.host}/ws`;
+let ws = null;
+let wsRetryTimer = null;
+
+function connectWS() {
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    setWsStatus(true);
+    log('WebSocket 연결', 'info');
+    clearTimeout(wsRetryTimer);
+  };
+
+  ws.onclose = () => {
+    setWsStatus(false);
+    log('WebSocket 끊김 - 3초 후 재연결', 'warn');
+    wsRetryTimer = setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => {
+    log('WebSocket 오류', 'fail');
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      handleServerMsg(data);
+    } catch(err) {
+      console.error('WS 파싱 오류:', err);
+    }
+  };
+}
+
+function sendWS(data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
+  } else {
+    log('WS 미연결', 'fail');
+  }
+}
+
+function setWsStatus(connected) {
+  document.getElementById('wsDot').className   = 'ws-dot' + (connected ? ' connected' : '');
+  document.getElementById('wsLabel').textContent = connected ? 'WS 연결됨' : 'WS 끊김';
+}
+
+// ════════════════════════════════════════════
+// 서버 메시지 처리
+// ════════════════════════════════════════════
+function handleServerMsg(data) {
+  const type = data.type;
+
+  if (type === 'device_list') {
+    updateDeviceList(data.devices || []);
+  }
+  else if (type === 'device_update') {
+    updateDeviceState(data.device_id, data.state || {});
+  }
+  else if (type === 'sensor_data') {
+    updateSensor(data.device_id, data.temp, data.humidity);
+  }
+  else if (type === 'cmd_result') {
+    const isOk   = data.status === 'ok';
+    const isFail = data.status === 'fail';
+    const icon   = isOk ? '✅' : isFail ? '❌' : '❓';
+    const result = document.getElementById('voiceResult');
+    result.textContent = icon + ' ' + data.msg;
+    result.style.color = isOk ? 'var(--green)' : isFail ? 'var(--red)' : 'var(--text2)';
+    log(data.msg, isOk ? 'ok' : 'fail');
+    // ── 욕실 온도: cmd_result에서 직접 처리 (안전장치) ──────────
+    if (isOk && data.cmd === 'set_bathroom_temp' && data.value != null) {
+      setBathroomTempDisplay(data.value);
+    }
+    // ── 명령 결과 → 상태 뱃지 동기화 ──────────────────────────
+    if (isOk) syncBadgeFromCmdResult(data);
+    // ── 음성 PIR 모드 전환 시 버튼 UI 동기화 (v2) ──────────────
+    if (isOk) syncPirModeFromResult(data);
+    // 4초 후 결과 클리어
+    clearTimeout(window._cmdClearTimer);
+    window._cmdClearTimer = setTimeout(() => clearVoiceResult(), 4000);
+  }
+  else if (type === 'wake_detected') {
+    setModeBadge('listening', '🎙 LISTENING');
+    document.getElementById('voiceText').textContent = '명령을 말씀하세요...';
+    document.getElementById('voiceText').classList.remove('placeholder');
+    document.getElementById('micBtn').classList.add('active');
+    log('웨이크 워드 감지 → 명령 대기 중', 'info');
+  }
+  else if (type === 'wake_timeout') {
+    setModeIdle();
+    log('명령 대기 시간 초과 → IDLE', 'warn');
+  }
+  else if (type === 'stt_result') {
+    const text = data.text || '';
+    const voiceText = document.getElementById('voiceText');
+    voiceText.textContent = '🔄 ' + text;
+    voiceText.classList.remove('placeholder');
+    voiceText.style.color = 'var(--cyan)';
+    setModeIdle();
+    log('🎙️ STT: "' + text + '"', 'info');
+    // 3초 후 자동 클리어 → 힌트 복원
+    clearTimeout(window._sttClearTimer);
+    window._sttClearTimer = setTimeout(() => clearVoiceText(), 3000);
+  }
+  else if (type === 'music_control') {
+    handleMusicControl(data.action, data.value);
+  }
+  else if (type === 'pir_alert') {
+    handlePirAlert(data);
+  }
+  else if (type === 'bathroom_temp_set') {
+    setBathroomTempDisplay(data.value);
+  }
+
+  document.getElementById('lastUpdate').textContent =
+    new Date().toLocaleTimeString('ko-KR');
+}
+
+// ════════════════════════════════════════════
+// 디바이스 상태 업데이트
+// ════════════════════════════════════════════
+// v2: esp32_home 단일 통합
+const DEVICE_MAP = {
+  'esp32_home':     null,
+  'esp32_garage':   'garage',
+  'esp32_bathroom': 'bathroom',
+  'esp32_bedroom':  'bedroom',
+  'esp32_entrance': 'entrance',
+  'esp32_living':   'living',
+};
+const ROOM_LED_PIN   = { living:2, bathroom:4, bedroom:5, garage:12, entrance:13 };
+const ROOM_SERVO_PIN = { bedroom:14, garage:15, entrance:16 };
+
+function updateDeviceList(devices) {
+  const ALL_ROOMS = ['living','bathroom','bedroom','garage','entrance'];
+  ALL_ROOMS.forEach(key => setDeviceOnline(key, false));
+
+  devices.forEach(d => {
+    if (d.device_id === 'esp32_home') {
+      ALL_ROOMS.forEach(key => setDeviceOnline(key, true));
+    } else {
+      const key = DEVICE_MAP[d.device_id];
+      if (key) setDeviceOnline(key, true);
+    }
+  });
+
+  // 상태바 업데이트
+  const tcpDot = document.getElementById('tcpDot');
+  const tcpLabel = document.getElementById('tcpLabel');
+  tcpDot.style.background = devices.length > 0 ? 'var(--green)' : 'var(--red)';
+  tcpDot.style.boxShadow  = devices.length > 0 ? '0 0 4px var(--green)' : 'none';
+  tcpLabel.textContent = `TCP: ${devices.length} device${devices.length!==1?'s':''}`;
+}
+
+function setDeviceOnline(key, online) {
+  const card  = document.getElementById(`card-${key}`);
+  const badge = document.getElementById(`badge-${key}`);
+  if (!card) return;
+
+  if (online) {
+    card.classList.add('online');
+    badge.textContent = 'ONLINE';
+    badge.className   = 'device-badge online';
+  } else {
+    card.classList.remove('online');
+    badge.textContent = 'OFFLINE';
+    badge.className   = 'device-badge';
+  }
+}
+
+function updateDeviceState(device_id, state) {
+  // v2: esp32_home → room별 핀으로 분리 처리
+  if (device_id === 'esp32_home') {
+    const ALL_ROOMS = ['living','bathroom','bedroom','garage','entrance'];
+    ALL_ROOMS.forEach(room => {
+      const lpin = ROOM_LED_PIN[room];
+      const spin = ROOM_SERVO_PIN[room];
+      if (lpin !== undefined && state[`led_${lpin}`] !== undefined) {
+        updateLedStatus(room, state[`led_${lpin}`] === 1 ? 'on' : 'off');
+      }
+      if (spin !== undefined && state[`servo_${spin}`] !== undefined) {
+        const angle  = state[`servo_${spin}`];
+        const slider = document.querySelector(`#card-${room} .servo-slider`);
+        const valEl  = document.getElementById(`servo-${room}-val`);
+        if (slider) slider.value = angle;
+        if (valEl)  valEl.textContent = angle + '°';
+        if (room === 'bedroom') updateCurtainStatus(angle);
+        else                    updateDoorStatus(room, angle);
+      }
+    });
+    return;
+  }
+
+  // 기존 개별 디바이스 호환
+  const key = DEVICE_MAP[device_id];
+  if (!key) return;
+
+  if (state.led_2 !== undefined) {
+    updateLedStatus(key, state.led_2 === 1 ? 'on' : 'off');
+  }
+  if (state.servo_18 !== undefined) {
+    const angle  = state.servo_18;
+    const slider = document.querySelector(`#card-${key} .servo-slider`);
+    const valEl  = document.getElementById(`servo-${key}-val`);
+    if (slider) slider.value = angle;
+    if (valEl)  valEl.textContent = angle + '°';
+    if (key === 'bedroom')       updateCurtainStatus(angle);
+    else if (key === 'garage')   updateDoorStatus('garage', angle);
+    else if (key === 'entrance') updateDoorStatus('entrance', angle);
+  }
+}
+
+function updateSensor(device_id, temp, humidity) {
+  // v2: esp32_home은 room 필드로 구분 (sensor 데이터에 room 포함)
+  const room = (device_id === 'esp32_home') ? (arguments[3] || null) : null;
+
+  if (device_id === 'esp32_home' && temp != null) {
+    // esp32_home sensor는 room 필드 없이 전체 반영 (현재 미사용)
+  }
+  if (device_id === 'esp32_bathroom' && temp != null) {
+    document.getElementById('temp-bathroom').textContent = temp.toFixed(1);
+  }
+  if (device_id === 'esp32_bedroom') {
+    if (temp != null)     document.getElementById('temp-bedroom').textContent = temp.toFixed(1);
+    if (humidity != null) document.getElementById('humi-bedroom').textContent = humidity.toFixed(1);
+
+    // 7세그먼트 표시 업데이트
+    const mode = currentSeg7Mode;
+    const val  = mode === 'temp' ? temp : humidity;
+    if (val != null) {
+      document.getElementById('seg7-display').textContent =
+        val.toFixed(1) + (mode === 'temp' ? '°C' : ' %');
+    }
+  }
+}
+
+// ════════════════════════════════════════════
+// 명령 전송
+// ════════════════════════════════════════════
+function sendCmd(data) {
+  sendWS({ type: 'manual_cmd', ...data });
+  log(`→ ${data.device_id} ${data.cmd}` +
+    (data.state  ? ` ${data.state}`  : '') +
+    (data.angle  !== undefined ? ` ${data.angle}°` : '') +
+    (data.mode   ? ` [${data.mode}]` : ''), 'info');
+}
+
+// ── 전등 제어 + 상태 뱃지 업데이트 ──────────────────────────────────
+// ── cmd_result → 뱃지 자동 동기화 ─────────────────────────────────
+// 서버 msg 패턴: "esp32_bedroom led 명령 전송 state=on"
+//               "esp32_garage servo 명령 전송 angle=90"
+function syncBadgeFromCmdResult(data) {
+  // v2: room 필드 기반
+  let cmd   = data.cmd;
+  let room  = data.room;
+  let state = data.state;
+  let angle = data.angle;
+
+  // room 없으면 msg에서 파싱
+  if ((!cmd || !room) && data.msg) {
+    // v2 패턴: "esp32_home led 명령 전송 state=on" → room은 data.room
+    if (!room && data.room) room = data.room;
+    // v1 호환 패턴: "esp32_bedroom led 명령 전송 state=on"
+    const m = data.msg.match(
+      /^esp32_(?:home|([a-z]+))\s+([a-z]+)\s+명령\s+전송(?:\s+state=([a-z]+))?(?:\s+angle=(\d+))?/
+    );
+    if (m) {
+      if (!room) room = m[1] || data.room;
+      if (!cmd)  cmd  = m[2];
+      if (m[3])  state = m[3];
+      if (m[4])  angle = parseInt(m[4]);
+    }
+  }
+
+  // set_bathroom_temp: room 없이도 처리 (room 가드보다 먼저)
+  if (cmd === 'set_bathroom_temp' && data.value != null) {
+    setBathroomTempDisplay(data.value);
+    return;
+  }
+
+  if (!room || !cmd) return;
+
+  if (cmd === 'led' && state) {
+    updateLedStatus(room, state);
+  }
+  else if (cmd === 'servo' && angle !== undefined) {
+    if (room === 'bedroom') updateCurtainStatus(angle);
+    else                    updateDoorStatus(room, angle);
+  }
+}
+
+function sendLed(key, pin, state) {
+  // v2: esp32_home + room
+  sendCmd({ cmd:'led', room: key, state, device_id: 'esp32_home' });
+  updateLedStatus(key, state);
+}
+
+function updateLedStatus(key, state) {
+  const badge = document.getElementById(`status-${key}-led`);
+  const val   = document.getElementById(`val-${key}-led`);
+  if (!badge || !val) return;
+  if (state === 'on') {
+    badge.className = 'status-badge on';
+    val.textContent = 'ON';
+  } else {
+    badge.className = 'status-badge off';
+    val.textContent = 'OFF';
+  }
+  // 3D 하우스 동기화
+  houseSetLed(key, state === 'on');
+}
+
+// ── 차고문 제어 + 상태 뱃지 업데이트 ────────────────────────────────
+function sendDoor(key, angle) {
+  // v2: esp32_home + room
+  sendCmd({ cmd:'servo', room: key, angle, device_id: 'esp32_home' });
+  // 슬라이더 동기화
+  const slider = document.querySelector(`#card-${key} .servo-slider`);
+  const valEl  = document.getElementById(`servo-${key}-val`);
+  if (slider) slider.value = angle;
+  if (valEl)  valEl.textContent = angle + '°';
+  updateDoorStatus(key, angle);
+}
+
+function updateDoorStatus(key, angle) {
+  const badge = document.getElementById(`status-${key}-door`);
+  const val   = document.getElementById(`val-${key}-door`);
+  if (!badge || !val) return;
+  if (angle >= 45) {
+    badge.className = 'status-badge open';
+    val.textContent = '열림';
+  } else {
+    badge.className = 'status-badge closed';
+    val.textContent = '닫힘';
+  }
+  // 3D 하우스 동기화
+  houseSetDoor(key, angle >= 45);
+}
+
+// ── 커튼 제어 + 상태 뱃지 업데이트 ─────────────────────────────────
+function sendCurtain(angle) {
+  sendCmd({ cmd:'servo', room:'bedroom', angle, device_id:'esp32_home' });
+  // 슬라이더 동기화
+  const slider = document.querySelector('#card-bedroom .servo-slider');
+  const valEl  = document.getElementById('servo-bedroom-val');
+  if (slider) slider.value = angle;
+  if (valEl)  valEl.textContent = angle + '°';
+  updateCurtainStatus(angle);
+}
+
+function updateCurtainStatus(angle) {
+  const badge = document.getElementById('status-bedroom-curtain');
+  const val   = document.getElementById('val-bedroom-curtain');
+  if (!badge || !val) return;
+  if (angle >= 45) {
+    badge.className = 'status-badge open';
+    val.textContent = '열림';
+  } else {
+    badge.className = 'status-badge closed';
+    val.textContent = '닫힘';
+  }
+  // 3D 하우스 동기화
+  houseSetCurtain(angle >= 45);
+}
+
+// 음성 텍스트 전송
+function sendVoiceText(text) {
+  sendWS({ type: 'voice_text', text });
+  log(`🎙️ "${text}"`, 'info');
+}
+
+// 수동 입력 전송
+document.getElementById('sendBtn').onclick = () => {
+  const text = document.getElementById('manualInput').value.trim();
+  if (!text) return;
+  sendVoiceText(text);
+  document.getElementById('manualInput').value = '';
+};
+document.getElementById('manualInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('sendBtn').click();
+});
+
+// ════════════════════════════════════════════
+// 음성 인식 (Web Speech API)
+// ════════════════════════════════════════════
+let recognition = null;
+let isListening = false;
+
+function initSpeech() {
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    log('Web Speech API 미지원 브라우저', 'warn');
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.lang = 'ko-KR';
+  recognition.continuous = false;
+  recognition.interimResults = true;
+
+  recognition.onstart = () => {
+    isListening = true;
+    document.getElementById('micBtn').classList.add('active');
+    document.getElementById('voiceText').textContent = '듣는 중...';
+    document.getElementById('voiceText').classList.remove('placeholder');
+  };
+
+  recognition.onresult = (e) => {
+    const results = e.results;
+    const text = results[results.length - 1][0].transcript;
+    const isFinal = results[results.length - 1].isFinal;
+    document.getElementById('voiceText').textContent = text;
+    if (isFinal) sendVoiceText(text);
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    document.getElementById('micBtn').classList.remove('active');
+  };
+
+  recognition.onerror = (e) => {
+    log(`음성 인식 오류: ${e.error}`, 'fail');
+    isListening = false;
+    document.getElementById('micBtn').classList.remove('active');
+  };
+}
+
+// ── 모드 뱃지 헬퍼 ─────────────────────────────────────────────
+function setModeBadge(cls, label) {
+  const b = document.getElementById('modeBadge');
+  b.className = 'voice-mode-badge ' + cls;
+  b.textContent = label;
+}
+function setModeIdle() {
+  setModeBadge('', '⬤ IDLE');
+  document.getElementById('micBtn').classList.remove('active');
+}
+
+function clearVoiceText() {
+  const el = document.getElementById('voiceText');
+  el.textContent = '버튼을 누르거나 "자비스야"라고 말하세요';
+  el.classList.add('placeholder');
+  el.style.color = '';
+}
+
+function clearVoiceResult() {
+  const el = document.getElementById('voiceResult');
+  el.textContent = '';
+  el.style.color = '';
+}
+
+// ── 서버 STT 활성화 (REST + WS 동시) ────────────────────────────
+async function activateServerSTT() {
+  // 1. WS: manual_trigger (즉시 전달)
+  sendWS({ type: 'manual_trigger' });
+
+  // 2. REST POST /stt/activate (fallback + 상태 동기화)
+  try {
+    const res = await fetch('/stt/activate', { method: 'POST' });
+    if (res.ok) {
+      log('🔔 서버 STT 활성화', 'info');
+    }
+  } catch(e) {
+    // WS로만 전달됐으면 무시
+  }
+}
+
+// ── 마이크 버튼 (버튼 모드 + 웨이크 워드 모드 공존) ──────────────
+document.getElementById('micBtn').onclick = async () => {
+  if (!recognition) { initSpeech(); }
+
+  if (isListening) {
+    // 브라우저 STT 중단
+    if (recognition) recognition.stop();
+    setModeIdle();
+    return;
+  }
+
+  // 1. 브라우저 Web Speech API STT 시작
+  if (recognition) {
+    try {
+      recognition.start();
+      setModeBadge('listening', '🎙 LISTENING');
+    } catch(e) {
+      log('브라우저 STT 시작 오류: ' + e.message, 'warn');
+    }
+  }
+
+  // 2. 서버 STT(Whisper) activate 동시 호출
+  await activateServerSTT();
+};
+
+// ════════════════════════════════════════════
+// 희망 온도 제어
+// ════════════════════════════════════════════
+function adjustTarget(room, delta) {
+  const input = document.getElementById(`target-${room}`);
+  if (!input) return;
+  const val = parseFloat(input.value) || 24;
+  input.value = Math.min(40, Math.max(10, val + delta)).toFixed(1);
+}
+
+function applyTarget(room) {
+  const input = document.getElementById(`target-${room}`);
+  if (!input) return;
+  const target = parseFloat(input.value);
+  if (isNaN(target)) return;
+
+  if (room === 'bathroom') {
+    setBathroomTempDisplay(target);
+    sendCmd({cmd:'set_bathroom_temp', device_id:'esp32_home', value:target});
+  }
+  log(`🌡️ 욕실 희망온도 → ${target}°C`, 'info');
+}
+
+// ── 욕실 희망온도 웹앱 표시 (음성/버튼 공통) ───────────────────────
+function setBathroomTempDisplay(value) {
+  const val = parseFloat(value);
+  if (isNaN(val)) return;
+
+  // input 필드 동기화
+  const input = document.getElementById('target-bathroom');
+  if (input) input.value = val.toFixed(1);
+
+  // 7세그먼트 디스플레이 업데이트
+  const seg = document.getElementById('seg7-display');
+  if (seg) {
+    seg.textContent = val.toFixed(1) + '°C';
+    seg.classList.add('seg7-active');
+    clearTimeout(window._seg7Timer);
+    window._seg7Timer = setTimeout(() => seg.classList.remove('seg7-active'), 2000);
+  }
+
+  // 설정 온도 뱃지 업데이트
+  const badge = document.getElementById('bathroom-temp-set-badge');
+  if (badge) {
+    badge.textContent = `설정 ${val.toFixed(1)}°C`;
+    badge.style.display = 'inline-block';
+  }
+
+  // seg7 모드 버튼 활성화
+  document.querySelectorAll('.seg7-mode-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('seg7-temp');
+  if (btn) btn.classList.add('active');
+
+  log(`🌡️ 욕실 희망온도 → ${val.toFixed(1)}°C (7세그먼트 표시)`, 'ok');
+}
+
+// ════════════════════════════════════════════
+// 7세그먼트 모드
+// ════════════════════════════════════════════
+let currentSeg7Mode = 'temp';
+
+function setSeg7Mode(mode) {
+  currentSeg7Mode = mode;
+  document.querySelectorAll('.seg7-mode-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(`seg7-${mode === 'humidity' ? 'humi' : mode}`);
+  if (btn) btn.classList.add('active');
+
+  // 현재 값으로 즉시 업데이트
+  const val = mode === 'temp'
+    ? parseFloat(document.getElementById('temp-bathroom').textContent)
+    : parseFloat(document.getElementById('temp-bathroom').textContent); // 욕실은 온도만
+
+  if (!isNaN(val)) {
+    sendCmd({cmd:'seg7',pin_clk:22,pin_dio:23,mode,value:val,device_id:'esp32_home',room:'bathroom'});
+  }
+}
+
+// ════════════════════════════════════════════
+// 3D 하우스 렌더러
+// ════════════════════════════════════════════
+const house = {
+  garage:   { led: false, door: false },   // door: false=닫힘, true=열림
+  living:   { led: false },
+  bedroom:  { led: false, curtain: false },
+  entrance: { led: false, door: false },
+  bathroom: { led: false },
+};
+
+// 음악 파장 상태
+let musicWaveActive = false;
+let musicWavePhase  = 0;
+let houseAnimFrame  = null;
+
+function houseSetLed(room, on) {
+  if (house[room] !== undefined) { house[room].led = on; drawHouse(); }
+}
+function houseSetDoor(room, open) {
+  if (house[room] !== undefined && house[room].door !== undefined) {
+    house[room].door = open; drawHouse();
+  }
+}
+function houseSetCurtain(open) {
+  house.bedroom.curtain = open; drawHouse();
+}
+function houseSetMusic(on) {
+  musicWaveActive = on;
+  if (on) startHouseAnim(); else { stopHouseAnim(); drawHouse(); }
+}
+
+function startHouseAnim() {
+  if (houseAnimFrame) return;
+  function loop() {
+    musicWavePhase += 0.04;
+    drawHouse();
+    houseAnimFrame = requestAnimationFrame(loop);
+  }
+  houseAnimFrame = requestAnimationFrame(loop);
+}
+function stopHouseAnim() {
+  if (houseAnimFrame) { cancelAnimationFrame(houseAnimFrame); houseAnimFrame = null; }
+}
+
+function drawHouse() {
+  const canvas = document.getElementById('houseCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // 배경
+  ctx.fillStyle = '#07091a';
+  ctx.fillRect(0, 0, W, H);
+
+  const PAD  = 8;
+  const WALL = 3;
+  const ox = PAD, oy = PAD;
+  const TW = W - PAD * 2;
+  const TH = H - PAD * 2 - 16;
+
+  // ── 도면 비율 ──────────────────────────────────────────────
+  // 이미지 도면 기준:
+  //  ┌─────────────────────────────┐
+  //  │            차고              │  상단 전체
+  //  ├──────┬──────────────┬───────┤
+  //  │  현관 │              │       │
+  //  ├──────┤    거실        │  침실  │
+  //  │  욕실 │  (음악파장바)   │       │
+  //  └──────┴──────────────┴───────┘
+
+  const garageH   = Math.round(TH * 0.32);
+  const lowerH    = TH - garageH - WALL;
+  const lowerY    = oy + garageH + WALL;
+
+  // 하단 3열: 좌(현관+욕실) 22% / 중(거실) 43% / 우(침실) 35%
+  const leftW  = Math.round(TW * 0.22);
+  const midW   = Math.round(TW * 0.43);
+  const rightW = TW - leftW - midW - WALL * 2;
+  const midX   = ox + leftW + WALL;
+  const rightX = midX + midW + WALL;
+
+  // 좌측: 현관(위 44%) / 욕실(아래 56%)
+  const entranceH = Math.round(lowerH * 0.44);
+  const bathH     = lowerH - entranceH - WALL;
+  const bathY     = lowerY + entranceH + WALL;
+
+  // ── 방 정의 ────────────────────────────────────────────────
+  const ROOMS = [
+    { id:'garage',   x:ox,    y:oy,      w:TW,     h:garageH,   label:'차고', accent:'#FFB400', fill:'rgba(255,180,0,0.07)'    },
+    { id:'entrance', x:ox,    y:lowerY,  w:leftW,  h:entranceH, label:'현관', accent:'#00FF88', fill:'rgba(0,255,136,0.07)'    },
+    { id:'bathroom', x:ox,    y:bathY,   w:leftW,  h:bathH,     label:'욕실', accent:'#00C8FF', fill:'rgba(0,200,255,0.07)'    },
+    { id:'living',   x:midX,  y:lowerY,  w:midW,   h:lowerH,    label:'거실', accent:'#A060FF', fill:'rgba(160,96,255,0.07)'   },
+    { id:'bedroom',  x:rightX,y:lowerY,  w:rightW, h:lowerH,    label:'침실', accent:'#FF6090', fill:'rgba(255,96,144,0.07)'   },
+  ];
+
+  // ── 방 그리기 ────────────────────────────────────────────────
+  function drawRoom(r) {
+    const ledOn = (house[r.id] || {}).led;
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    const isLiving = r.id === 'living';
+
+    // 배경
+    ctx.fillStyle = ledOn ? r.fill : 'rgba(255,255,255,0.02)';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+
+    // LED ON 방사형 glow
+    if (ledOn) {
+      const gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(r.w,r.h)*0.65);
+      gr.addColorStop(0, r.accent + '28');
+      gr.addColorStop(1, r.accent + '00');
+      ctx.fillStyle = gr;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+
+    // 테두리
+    ctx.strokeStyle = r.accent;
+    ctx.lineWidth   = ledOn ? 1.8 : 0.6;
+    ctx.globalAlpha = ledOn ? 0.95 : 0.22;
+    ctx.strokeRect(r.x+1, r.y+1, r.w-2, r.h-2);
+    ctx.globalAlpha = 1;
+
+    // ── 전등 아이콘 위치 ─────────────────────────────────────
+    const iconX = isLiving ? cx : cx;
+    const iconY = isLiving
+      ? r.y + r.h * 0.25
+      : (r.h > 70 ? cy - 14 : cy - 10);
+    const R     = 5;
+    const rays  = 8;
+    const rLen  = ledOn ? 5 : 3;
+
+    // glow 원
+    if (ledOn) {
+      const gg = ctx.createRadialGradient(iconX, iconY, 0, iconX, iconY, R+8);
+      gg.addColorStop(0, r.accent+'40');
+      gg.addColorStop(1, r.accent+'00');
+      ctx.fillStyle = gg;
+      ctx.beginPath();
+      ctx.arc(iconX, iconY, R+8, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // 원 본체
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, R, 0, Math.PI*2);
+    ctx.fillStyle   = ledOn ? r.accent : '#1e3050';
+    ctx.shadowColor = ledOn ? r.accent : 'transparent';
+    ctx.shadowBlur  = ledOn ? 14 : 0;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // 광선 8개
+    ctx.strokeStyle = ledOn ? r.accent : '#1a2d45';
+    ctx.lineWidth   = ledOn ? 1.5 : 0.8;
+    ctx.shadowColor = ledOn ? r.accent : 'transparent';
+    ctx.shadowBlur  = ledOn ? 6 : 0;
+    for (let i = 0; i < rays; i++) {
+      const a  = (Math.PI*2/rays)*i - Math.PI/2;
+      const x1 = iconX + Math.cos(a)*(R+2);
+      const y1 = iconY + Math.sin(a)*(R+2);
+      const x2 = iconX + Math.cos(a)*(R+2+rLen);
+      const y2 = iconY + Math.sin(a)*(R+2+rLen);
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+
+    // 방 라벨
+    const fs = r.w < 55 ? 8 : (r.w < 80 ? 9 : 10);
+    ctx.font      = `bold ${fs}px 'JetBrains Mono',monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = ledOn ? '#e8f4ff' : '#3a5070';
+    const lblY = iconY + R + rLen + 10;
+    ctx.fillText(r.label, cx, lblY);
+  }
+
+  ROOMS.forEach(drawRoom);
+
+  // ── 음악 파장 바 (거실, 음악 재생 시) ────────────────────────
+  const lr  = ROOMS.find(r => r.id === 'living');
+  const wcx = lr.x + lr.w / 2;
+  const wcy = lr.y + lr.h * 0.68;
+
+  if (musicWaveActive) {
+    const bars=9, bw=3.5, gap=2.5;
+    const tw = bars*(bw+gap)-gap;
+    for (let i=0; i<bars; i++) {
+      const ph = musicWavePhase + i*0.65;
+      const bh = 6 + Math.abs(Math.sin(ph))*22;
+      const bx = wcx - tw/2 + i*(bw+gap);
+      const by = wcy - bh/2;
+      const g  = ctx.createLinearGradient(bx,by,bx,by+bh);
+      g.addColorStop(0,'#A060FF');
+      g.addColorStop(0.5,'#C080FF');
+      g.addColorStop(1,'#00C8FF');
+      ctx.fillStyle   = g;
+      ctx.shadowColor = '#A060FF';
+      ctx.shadowBlur  = 10;
+      ctx.globalAlpha = 0.95;
+      ctx.fillRect(bx, by, bw, bh);
+    }
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+
+    ctx.font      = `bold 7px 'JetBrains Mono',monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#C080FF';
+    ctx.globalAlpha = 0.85;
+  // ctx.fillText('', wcx, wcy+18);
+    ctx.globalAlpha = 1;
+  }
+
+  // ── 벽선 ──────────────────────────────────────────────────
+  ctx.strokeStyle = '#2a3f5a';
+  ctx.lineWidth   = WALL;
+
+  // 외곽
+  ctx.strokeRect(ox+WALL/2, oy+WALL/2, TW-WALL, TH-WALL);
+
+  // 차고 하단 가로선
+  const gBotY = oy + garageH + WALL/2;
+  ctx.beginPath(); ctx.moveTo(ox, gBotY); ctx.lineTo(ox+TW, gBotY); ctx.stroke();
+
+  // 좌 | 중 세로선
+  const lRx = ox + leftW + WALL/2;
+  ctx.beginPath(); ctx.moveTo(lRx, lowerY); ctx.lineTo(lRx, oy+TH); ctx.stroke();
+
+  // 중 | 우 세로선
+  const mRx = rightX - WALL/2;
+  ctx.beginPath(); ctx.moveTo(mRx, lowerY); ctx.lineTo(mRx, oy+TH); ctx.stroke();
+
+  // 현관 | 욕실 가로선
+  const evY = lowerY + entranceH + WALL/2;
+  ctx.beginPath(); ctx.moveTo(ox, evY); ctx.lineTo(ox+leftW, evY); ctx.stroke();
+
+  // ── 범례 ──────────────────────────────────────────────────
+  const legY = H - 5;
+  ctx.font = '7px JetBrains Mono,monospace';
+  ctx.textAlign = 'left';
+  [
+    { col:'#FFD060', lbl:'LED ON'  },
+    { col:'#1e3050', lbl:'LED OFF' },
+  ].forEach((item,i) => {
+    const lx = PAD + i*90;
+    ctx.fillStyle   = item.col;
+    ctx.shadowColor = i===0 ? '#FFD060' : 'transparent';
+    ctx.shadowBlur  = i===0 ? 5 : 0;
+    ctx.font = '9px monospace';
+    ctx.fillText('☀', lx, legY);
+    ctx.shadowBlur = 0;
+    ctx.font = '7px JetBrains Mono,monospace';
+    ctx.fillStyle = '#4a6680';
+    ctx.fillText(' '+item.lbl, lx+12, legY);
+  });
+}
+
+
+// ── WS 상태 동기화 연동 ──────────────────────────────────────
+// updateLedStatus, syncBadgeFromCmdResult 에서 호출
+
+
+// ════════════════════════════════════════════
+// 🔒 PIR 보안 모드
+// ════════════════════════════════════════════
+let _currentPirMode = null;
+
+const PIR_MODE_CONFIG = {
+  away_mode:  { btnId:'pir-btn-away',  activeClass:'active-away',  dot:'guard',    text:'🚶 외출 모드 — 방범 감시 중 (침입 감지 시 알림)' },
+  home_mode:  { btnId:'pir-btn-home',  activeClass:'active-home',  dot:'presence', text:'🏠 귀가 모드 — 재실 감지 중 (장시간 정적 시 알림)' },
+  sleep_mode: { btnId:'pir-btn-sleep', activeClass:'active-sleep', dot:'guard',    text:'🌙 취침 모드 — 거실 방범 감시 중' },
+  wake_mode:  { btnId:'pir-btn-wake',  activeClass:'active-wake',  dot:'presence', text:'☀️ 기상 모드 — 재실 감지 중' },
+};
+
+function setPirMode(cmd) {
+  sendWS({ type:'llm_cmd', cmd:cmd, device_id:'esp32_home' });
+  _updatePirUI(cmd);
+  const labels = { away_mode:'외출', home_mode:'귀가', sleep_mode:'취침', wake_mode:'기상' };
+  log(`🔒 PIR 모드 설정: ${labels[cmd]}`, 'info');
+}
+
+function _updatePirUI(cmd) {
+  // 기존 버튼 초기화
+  Object.values(PIR_MODE_CONFIG).forEach(cfg => {
+    const btn = document.getElementById(cfg.btnId);
+    if (btn) btn.className = 'pir-mode-btn';
+  });
+
+  _currentPirMode = cmd;
+  const cfg = PIR_MODE_CONFIG[cmd];
+  if (!cfg) return;
+
+  // 활성 버튼 스타일
+  const btn = document.getElementById(cfg.btnId);
+  if (btn) btn.classList.add(cfg.activeClass);
+
+  // 상태 도트 + 텍스트
+  const dot  = document.getElementById('pir-status-dot');
+  const text = document.getElementById('pir-status-text');
+  dot.className  = `pir-status-dot ${cfg.dot}`;
+  text.textContent = cfg.text;
+
+  // 알림 뱃지 초기화
+  const badge = document.getElementById('pir-alert-badge');
+  badge.className   = 'pir-alert-badge';
+  badge.textContent = '감시 중';
+}
+
+function handlePirAlert(data) {
+  const msg   = data.msg   || 'PIR 알림';
+  const event = data.event || '';
+
+  // 알림 뱃지 갱신
+  const badge = document.getElementById('pir-alert-badge');
+  badge.className   = 'pir-alert-badge alert';
+  badge.textContent = '⚠ 감지됨!';
+
+  // 상태 텍스트 갱신
+  document.getElementById('pir-status-text').textContent = msg;
+
+  log(msg, 'fail');
+
+  // CCTV 모달 팝업
+  openCctvModal(msg);
+
+  // 10초 후 뱃지 복원 (모달은 수동 닫기)
+  setTimeout(() => {
+    badge.className   = 'pir-alert-badge';
+    badge.textContent = '감시 중';
+    if (_currentPirMode) {
+      const cfg = PIR_MODE_CONFIG[_currentPirMode];
+      if (cfg) document.getElementById('pir-status-text').textContent = cfg.text;
+    }
+  }, 10000);
+}
+
+// ── CCTV 모달 ────────────────────────────────────────────────
+function openCctvModal(alertMsg) {
+  const modal = document.getElementById('cctvModal');
+  document.getElementById('cctvAlertMsg').textContent  = alertMsg;
+  document.getElementById('cctvAlertTime').textContent =
+    new Date().toLocaleTimeString('ko-KR', {hour12:false});
+
+  // 스트림 이미지 새로고침 (캐시 방지)
+  const img = document.getElementById('cctvImg');
+  img.src = '/camera/stream?' + Date.now();
+
+  document.getElementById('cctvError').classList.remove('show');
+  modal.classList.add('show');
+}
+
+function closeCctvModal() {
+  document.getElementById('cctvModal').classList.remove('show');
+  // 스트림 정지 (src 클리어로 불필요한 연결 해제)
+  document.getElementById('cctvImg').src = '';
+}
+
+function dismissAlert() {
+  closeCctvModal();
+  log('✅ 보안 경고 해제', 'ok');
+  const badge = document.getElementById('pir-alert-badge');
+  badge.className   = 'pir-alert-badge';
+  badge.textContent = '감시 중';
+}
+
+function showCctvError() {
+  document.getElementById('cctvError').classList.add('show');
+  document.getElementById('cctvImg').style.display = 'none';
+}
+
+function hideCctvError() {
+  document.getElementById('cctvError').classList.remove('show');
+  document.getElementById('cctvImg').style.display = 'block';
+}
+
+// ── 음성 PIR 모드 전환 UI 동기화 (v3) ───────────────────────
+function syncPirModeFromResult(data) {
+  const msg = data.msg || '';
+
+  // 1순위: context=xxx 정규식 추출 (가장 정확)
+  const ctxMatch = msg.match(/context=(\w+)/);
+  if (ctxMatch) {
+    const contextMap = {
+      'away':  'away_mode',
+      'home':  'home_mode',
+      'sleep': 'sleep_mode',
+      'wake':  'wake_mode',
+    };
+    const cmd = contextMap[ctxMatch[1]];
+    if (cmd) { _updatePirUI(cmd); return; }
+  }
+
+  // 2순위: 한국어 모드명 전체 매칭 (단어 오매칭 방지)
+  const krMap = [
+    ['외출 모드', 'away_mode'],
+    ['귀가 모드', 'home_mode'],
+    ['취침 모드', 'sleep_mode'],
+    ['기상 모드', 'wake_mode'],
+  ];
+  for (const [kw, cmd] of krMap) {
+    if (msg.includes(kw)) { _updatePirUI(cmd); return; }
+  }
+}
+function log(msg, type = 'info') {
+  const list = document.getElementById('logList');
+  const item = document.createElement('div');
+  item.className = `log-item ${type}`;
+  const t = new Date().toLocaleTimeString('ko-KR', {hour12:false});
+  item.innerHTML = `<span class="log-time">${t}</span><span class="log-msg">${msg}</span>`;
+  list.appendChild(item);
+  list.scrollTop = list.scrollHeight;
+
+  // 최대 100개
+  while (list.children.length > 100) list.removeChild(list.firstChild);
+}
+
+function clearLog() {
+  document.getElementById('logList').innerHTML = '';
+}
+
+// ════════════════════════════════════════════
+// 🎵 거실 뮤직 플레이어 (YouTube IFrame API)
+// ════════════════════════════════════════════
+const PLAYLIST = [
+  { name: "Lofi Hip Hop Radio",      genre: "Lo-fi / Chill",      vid: "jfKfPfyJRdk" },
+  { name: "Jazz & Bossa Nova",       genre: "Jazz / Bossa Nova",  vid: "neV3EPgvZ3g" },
+  { name: "Chillhop Music",          genre: "Chillhop / Beats",   vid: "5yx6BWlEVcY" },
+  { name: "Smooth Jazz Cafe",        genre: "Smooth Jazz",        vid: "lP4A_X1SQPE" },
+  { name: "Ambient Study Music",     genre: "Ambient / Focus",    vid: "sjkrrmBnpGE" },
+];
+
+let musicIdx    = 0;
+let musicPlaying = false;
+let ytPlayer    = null;
+let ytReady     = false;
+let ytProgressTimer = null;
+
+// YouTube IFrame API 로드
+function loadYouTubeAPI() {
+  if (window.YT && window.YT.Player) {
+    // YT.Player까지 로드된 경우에만 직접 호출
+    onYouTubeIframeAPIReady();
+    return;
+  }
+  const tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+}
+
+window.onYouTubeIframeAPIReady = function() {
+  ytPlayer = new YT.Player('ytPlayerEl', {
+    height: '0', width: '0',
+    videoId: PLAYLIST[musicIdx].vid,
+    playerVars: { autoplay: 0, controls: 0, rel: 0 },
+    events: {
+      onReady:       onYTPlayerReady,
+      onStateChange: onYTStateChange,
+    }
+  });
+};
+
+function onYTPlayerReady(e) {
+  ytReady = true;
+  console.log('[YT] onYTReady fired — player ready');
+  setVolume(document.getElementById('volSlider').value);
+  updateTrackUI();
+  log('🎵 거실 뮤직 플레이어 준비 완료', 'info');
+  // 대기 중인 명령 실행
+  if (_pendingMusicCmd) {
+    const { action, value } = _pendingMusicCmd;
+    _pendingMusicCmd = null;
+    log(`🎵 대기 명령 실행: ${action}`, 'info');
+    setTimeout(() => _execMusicAction(action, value), 500);
+  }
+}
+
+function onYTStateChange(e) {
+  if (e.data === YT.PlayerState.ENDED) {
+    nextTrack();
+  } else if (e.data === YT.PlayerState.PLAYING) {
+    musicPlaying = true;
+    document.getElementById('playBtn').innerHTML  = '⏸ &nbsp;정지';
+    document.getElementById('playBtn').classList.add('playing');
+    document.getElementById('musicDisc').classList.add('playing');
+    houseSetMusic(true);   // 3D 파장 바 시작
+    startProgressTimer();
+    // ── WS 음악 상태 보고 ──────────────────────────────────
+    _reportMusicState('play');
+  } else if (e.data === YT.PlayerState.PAUSED) {
+    musicPlaying = false;
+    document.getElementById('playBtn').innerHTML  = '▶ &nbsp;재생';
+    document.getElementById('playBtn').classList.remove('playing');
+    document.getElementById('musicDisc').classList.remove('playing');
+    houseSetMusic(false);  // 3D 파장 바 정지
+    stopProgressTimer();
+    // ── WS 음악 상태 보고 ──────────────────────────────────
+    _reportMusicState('pause');
+  }
+}
+
+function startProgressTimer() {
+  stopProgressTimer();
+  ytProgressTimer = setInterval(() => {
+    if (!ytPlayer || !ytPlayer.getDuration) return;
+    const cur = ytPlayer.getCurrentTime() || 0;
+    const dur = ytPlayer.getDuration()    || 0;
+    document.getElementById('musicProgress').value   = dur ? (cur / dur) * 100 : 0;
+    document.getElementById('musicCurrent').textContent = fmtTime(cur);
+    document.getElementById('musicDuration').textContent = fmtTime(dur);
+  }, 1000);
+}
+
+function stopProgressTimer() {
+  clearInterval(ytProgressTimer);
+}
+
+function fmtTime(sec) {
+  if (isNaN(sec) || sec < 0) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function updateTrackUI() {
+  const t = PLAYLIST[musicIdx];
+  document.getElementById('trackName').textContent  = t.name;
+  document.getElementById('trackGenre').textContent = t.genre;
+  document.getElementById('trackNum').textContent   = `${musicIdx+1} / ${PLAYLIST.length}`;
+  document.getElementById('musicProgress').value    = 0;
+  document.getElementById('musicCurrent').textContent  = '0:00';
+  document.getElementById('musicDuration').textContent = '0:00';
+}
+
+function toggleMusic() {
+  if (!ytPlayer || !ytReady) {
+    log('플레이어 초기화 중... 잠시 후 다시 시도하세요', 'warn'); return;
+  }
+  if (musicPlaying) {
+    ytPlayer.pauseVideo();
+    log('⏸ 거실 음악 일시정지', 'info');
+  } else {
+    ytPlayer.playVideo();
+    log(`▶ 거실 음악 재생: ${PLAYLIST[musicIdx].name}`, 'info');
+  }
+}
+
+function prevTrack() {
+  musicIdx = (musicIdx - 1 + PLAYLIST.length) % PLAYLIST.length;
+  updateTrackUI();
+  if (ytPlayer && ytReady) {
+    ytPlayer.loadVideoById(PLAYLIST[musicIdx].vid);
+    if (!musicPlaying) ytPlayer.pauseVideo();
+    log(`⏮ 이전 곡: ${PLAYLIST[musicIdx].name}`, 'info');
+    // ── WS 트랙 변경 보고 ──────────────────────────────────
+    _reportMusicState('track');
+  }
+}
+
+function nextTrack() {
+  musicIdx = (musicIdx + 1) % PLAYLIST.length;
+  updateTrackUI();
+  if (ytPlayer && ytReady) {
+    ytPlayer.loadVideoById(PLAYLIST[musicIdx].vid);
+    if (!musicPlaying) ytPlayer.pauseVideo();
+    log(`⏭ 다음 곡: ${PLAYLIST[musicIdx].name}`, 'info');
+    // ── WS 트랙 변경 보고 ──────────────────────────────────
+    _reportMusicState('track');
+  }
+}
+
+function seekMusic(val) {
+  if (!ytPlayer || !ytReady) return;
+  const dur = ytPlayer.getDuration() || 0;
+  ytPlayer.seekTo((val / 100) * dur, true);
+}
+
+function setVolume(val) {
+  if (ytPlayer && ytReady) ytPlayer.setVolume(parseInt(val));
+  document.getElementById('volVal').textContent = val + '%';
+  // ── WS 볼륨 상태 보고 (디바운스: 연속 조작 시 마지막만 전송) ──
+  clearTimeout(_volumeReportTimer);
+  _volumeReportTimer = setTimeout(() => _reportMusicState('volume'), 500);
+}
+
+// ──────────────────────────────────────────────────────────
+// WS music_state 보고 헬퍼 (v1.6)
+// 브라우저 ytPlayer 이벤트 → 서버 UnifiedStateManager 동기화
+// ──────────────────────────────────────────────────────────
+let _volumeReportTimer = null;
+
+function _reportMusicState(action) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const track = PLAYLIST[musicIdx] || {};
+  const vol   = parseInt(document.getElementById('volSlider')?.value || 60);
+  const msg = {
+    type:    'music_state',
+    action:  action,           // play | pause | stop | volume | track
+    title:   track.name  || '',
+    genre:   track.genre || '',
+    volume:  vol,
+  };
+  ws.send(JSON.stringify(msg));
+}
+
+// WS music_control 메시지 수신 처리
+let _pendingMusicCmd = null;  // 플레이어 미준비 시 대기 명령
+
+function handleMusicControl(action, value) {
+  if (!ytPlayer || !ytReady) {
+    // 준비 안 됐으면 큐에 저장 → onYTReady 후 실행
+    _pendingMusicCmd = { action, value };
+    log('🎵 플레이어 준비 중 — 명령 대기', 'warn');
+    return;
+  }
+  _execMusicAction(action, value);
+}
+
+function _execMusicAction(action, value) {
+  switch (action) {
+    case 'play':
+      ytPlayer.playVideo();
+      log('▶ 거실 음악 재생 (음성 제어)', 'info');
+      break;
+    case 'pause':
+      ytPlayer.pauseVideo();
+      log('⏸ 거실 음악 정지 (음성 제어)', 'info');
+      break;
+    case 'next':
+      nextTrack();
+      log('⏭ 다음 곡 (음성 제어)', 'info');
+      break;
+    case 'prev':
+      prevTrack();
+      log('⏮ 이전 곡 (음성 제어)', 'info');
+      break;
+    case 'volume':
+      if (value !== undefined) {
+        const v = Math.min(100, Math.max(0, parseInt(value)));
+        ytPlayer.setVolume(v);
+        document.getElementById('volSlider').value = v;
+        document.getElementById('volVal').textContent = v + '%';
+        log(`🔊 볼륨 ${v}% (음성 제어)`, 'info');
+      }
+      break;
+  }
+}
+
+// ════════════════════════════════════════════
+// 초기화
+// ════════════════════════════════════════════
+window.onload = () => {
+  log('Voice IoT Controller 시작', 'info');
+  initSpeech();
+  connectWS();
+  updateTrackUI();
+  loadYouTubeAPI();
+  drawHouse();  // 3D 하우스 초기 렌더링
+};
+</script>
+</body>
+</html>
