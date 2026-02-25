@@ -29,7 +29,7 @@ server:
 
 ollama:
   host: "http://localhost:11434"
-  model: "exaone3.5:7.8b"
+  model: "exaone3.5:latest"
   timeout: 30
 
 # ================================================================
@@ -73,7 +73,7 @@ stt:
   porcupine_access_key: "7MPG0u7YUocUco+HH+48cQDyxc0tHB38TqbP+mpKIljNIBZ9cKheIA=="
   porcupine_model_path: "models/자비스야_ko_linux_v4_0_0.ppn"
   porcupine_params_path: "models/porcupine_params_ko.pv"
-  mic_device: 11
+  mic_device: 10
   vad_energy_threshold: 0.02
   noise_reduction: false
   noise_prop_decrease: 0.85

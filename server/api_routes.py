@@ -79,26 +79,14 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRout
     """
     router = APIRouter()
 
-    # # ── GET / ───────────────────────────────────────────────────────
-    # @router.get("/", response_class=HTMLResponse)
-    # async def serve_index():
-    #     """Web App index.html 서빙"""
-    #     index_path = WEB_DIR / "index.html"
-    #     if not index_path.exists():
-    #         return HTMLResponse(
-    #             content="<h2>Web App 준비 중입니다. (web/index.html 없음)</h2>",
-    #             status_code=200,
-    #         )
-    #     return FileResponse(str(index_path))
-
-     # ── GET / ───────────────────────────────────────────────────────
+    # ── GET / ───────────────────────────────────────────────────────
     @router.get("/", response_class=HTMLResponse)
     async def serve_index():
-        """첫 페이지: iot/index.html 서빙"""
+        """첫 페이지: iot/index_main.html 서빙"""
         index_path = WEB_DIR / "index_main.html"
         if not index_path.exists():
             return HTMLResponse(
-                content="<h2>첫 페이지 준비 중입니다. (iot/index.html 없음)</h2>",
+                content="<h2>첫 페이지 준비 중입니다. (iot/index_main.html 없음)</h2>",
                 status_code=200,
             )
         return FileResponse(str(index_path))

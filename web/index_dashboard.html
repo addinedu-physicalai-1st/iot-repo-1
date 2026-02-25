@@ -407,6 +407,32 @@ header {
 .log-item.info .log-msg { color:var(--cyan); }
 .log-item.warn .log-msg { color:var(--yellow); }
 
+/* ── 침입 알람 로그 아이템 ── */
+.log-item.alarm {
+  background: rgba(255,40,60,0.12);
+  border: 1px solid rgba(255,40,60,0.4);
+  border-radius: 6px;
+  animation: alarm-log-pulse 1.2s ease-in-out 3;
+}
+.log-item.alarm .log-time { color: rgba(255,100,120,0.8); }
+.log-item.alarm .log-msg  { color: #FF4060; font-weight:700; letter-spacing:0.02em; }
+.log-item.alarm .log-badge {
+  display: inline-block;
+  background: rgba(255,40,60,0.25);
+  border: 1px solid rgba(255,40,60,0.5);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 0.6rem;
+  color: #FF6080;
+  margin-left: 6px;
+  vertical-align: middle;
+  letter-spacing: 0.08em;
+}
+@keyframes alarm-log-pulse {
+  0%,100% { background:rgba(255,40,60,0.08); border-color:rgba(255,40,60,0.3); }
+  50%     { background:rgba(255,40,60,0.22); border-color:rgba(255,40,60,0.7); box-shadow:0 0 8px rgba(255,40,60,0.3); }
+}
+
 /* 센서 차트 */
 .chart-panel {
   background:var(--bg1); border:1px solid var(--border);
@@ -539,8 +565,153 @@ header {
 /* ── PIR 보안 카드 ── */
 #card-pir { --card-accent:#FF4060; }
 
+/* ── 현관 CAM 카드 ── */
+#card-cam { --card-accent:#00C8FF; }
+
+.cam-stream-wrap {
+  position:relative;
+  background:#020608;
+  border-radius:4px;
+  overflow:hidden;
+  aspect-ratio:4/3;
+  max-height:200px;
+  margin-bottom:10px;
+}
+.cam-stream-wrap img {
+  width:100%; height:100%;
+  object-fit:cover; display:block;
+}
+.cam-placeholder {
+  width:100%; height:100%;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  gap:6px; color:var(--text2);
+  font-family:var(--font-mono); font-size:0.65rem;
+}
+.cam-placeholder span:first-child { font-size:1.8rem; }
+
+.cam-verdict-badge {
+  position:absolute; top:8px; left:8px;
+  padding:3px 10px; border-radius:12px;
+  font-size:0.65rem; font-weight:600;
+  letter-spacing:0.08em;
+  backdrop-filter:blur(6px);
+  display:none;
+}
+.cam-verdict-badge.clear    { background:rgba(60,60,60,0.8);   color:#888; }
+.cam-verdict-badge.known    { background:rgba(0,200,100,0.85); color:#fff; display:block; }
+.cam-verdict-badge.delivery { background:rgba(0,180,255,0.85); color:#fff; display:block; }
+.cam-verdict-badge.intruder {
+  background:rgba(255,40,60,0.9); color:#fff; display:block;
+  animation:cam-badge-blink .7s ease-in-out infinite alternate;
+}
+@keyframes cam-badge-blink { from{opacity:.7} to{opacity:1} }
+
+.cam-rec-dot {
+  position:absolute; top:8px; right:8px;
+  font-size:0.6rem; color:var(--red);
+  background:rgba(0,0,0,0.55); padding:2px 7px;
+  border-radius:3px; letter-spacing:.1em; display:none;
+}
+.cam-rec-dot.active { display:block; }
+.cam-rec-blink { animation:blink 1s step-start infinite; }
+@keyframes blink { 50%{opacity:0} }
+
+.cam-info-row {
+  display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:8px;
+}
+.cam-status-wrap {
+  display:flex; align-items:center; gap:6px;
+  font-family:var(--font-mono); font-size:0.65rem; color:var(--text2);
+}
+.cam-dot {
+  width:7px; height:7px; border-radius:50%; background:#333;
+  transition:background .3s;
+}
+.cam-dot.live    { background:var(--green); box-shadow:0 0 5px var(--green); }
+.cam-dot.alert   { background:var(--red);   box-shadow:0 0 7px var(--red);
+                   animation:cam-badge-blink .6s infinite alternate; }
+.cam-dot.offline { background:#333; }
+
+.cam-btn-snapshot {
+  padding:3px 10px;
+  background:rgba(0,200,255,0.08);
+  border:1px solid rgba(0,200,255,0.2);
+  color:var(--cyan); border-radius:3px;
+  font-size:0.65rem; font-family:var(--font-mono);
+  cursor:pointer; transition:background .2s;
+}
+.cam-btn-snapshot:hover { background:rgba(0,200,255,0.15); }
+
+.cam-last-event {
+  font-size:0.65rem; color:var(--text2);
+  font-family:var(--font-mono);
+  margin-top:2px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+/* 침입 알람 모달 (cam_alert intruder) */
+.cam-alert-overlay {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.88);
+  z-index:2000; align-items:center; justify-content:center;
+  backdrop-filter:blur(5px);
+  animation:fadeUp .2s ease;
+}
+.cam-alert-overlay.show { display:flex; }
+.cam-alert-box {
+  background:var(--bg1);
+  border:1px solid rgba(255,40,60,0.4);
+  border-radius:8px; width:90%; max-width:520px;
+  overflow:hidden;
+  box-shadow:0 0 60px rgba(255,40,60,0.25);
+  animation:fadeUp .3s cubic-bezier(.16,1,.3,1);
+}
+.cam-alert-header {
+  display:flex; align-items:center; gap:10px;
+  padding:14px 18px;
+  background:rgba(255,40,60,0.08);
+  border-bottom:1px solid rgba(255,40,60,0.2);
+}
+.cam-alert-header h3 { flex:1; font-size:.95rem; color:var(--red); font-weight:600; }
+.cam-alert-conf { font-size:.65rem; color:#ff8080; font-family:var(--font-mono); }
+.cam-alert-snap {
+  position:relative; background:#020608;
+  aspect-ratio:4/3; max-height:260px; overflow:hidden;
+}
+.cam-alert-snap img { width:100%; height:100%; object-fit:cover; display:block; }
+.cam-alert-snap-ts {
+  position:absolute; bottom:6px; right:8px;
+  font-size:.6rem; color:#666;
+  background:rgba(0,0,0,.6); padding:2px 6px; border-radius:2px;
+  font-family:var(--font-mono);
+}
+.cam-alert-msg {
+  padding:10px 18px;
+  font-size:.75rem; color:#cc3040; letter-spacing:.04em;
+  border-bottom:1px solid rgba(255,40,60,0.1);
+}
+.cam-alert-actions {
+  display:flex; gap:8px; padding:12px 18px;
+}
+.cam-btn-confirm {
+  flex:1; padding:9px;
+  background:rgba(0,255,136,0.08); border:1px solid rgba(0,255,136,0.25);
+  color:var(--green); border-radius:4px; cursor:pointer;
+  font-size:.75rem; font-family:var(--font-mono); transition:background .2s;
+}
+.cam-btn-confirm:hover { background:rgba(0,255,136,0.15); }
+.cam-btn-modal-close {
+  padding:9px 16px;
+  background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
+  color:var(--text2); border-radius:4px; cursor:pointer;
+  font-size:.75rem; font-family:var(--font-mono); transition:background .2s;
+}
+.cam-btn-modal-close:hover { background:rgba(255,255,255,0.08); }
+
 .pir-mode-grid {
-  display:grid; grid-template-columns:repeat(4,1fr);
+  display:grid; grid-template-columns:repeat(5,1fr);
   gap:8px; margin-bottom:12px;
 }
 .pir-mode-btn {
@@ -576,6 +747,11 @@ header {
   border-color:var(--yellow); color:var(--yellow);
   box-shadow:0 0 10px rgba(255,180,0,0.2);
 }
+.pir-mode-btn.active-dnd {
+  background:rgba(160,96,255,0.12);
+  border-color:var(--purple); color:var(--purple);
+  box-shadow:0 0 10px rgba(160,96,255,0.25);
+}
 
 .pir-status-bar {
   display:flex; align-items:center; gap:10px;
@@ -587,9 +763,10 @@ header {
   background:var(--text2); flex-shrink:0;
   transition:all 0.4s;
 }
-.pir-status-dot.guard  { background:var(--red);    box-shadow:0 0 8px var(--red);    animation:pir-blink 1.5s ease-in-out infinite; }
+.pir-status-dot.guard    { background:var(--red);    box-shadow:0 0 8px var(--red);    animation:pir-blink 1.5s ease-in-out infinite; }
 .pir-status-dot.presence { background:var(--green);  box-shadow:0 0 8px var(--green);  }
-.pir-status-dot.off    { background:var(--text2); box-shadow:none; animation:none; }
+.pir-status-dot.dnd      { background:var(--purple); box-shadow:0 0 8px var(--purple); }
+.pir-status-dot.off      { background:var(--text2);  box-shadow:none; animation:none; }
 @keyframes pir-blink {
   0%,100%{opacity:1} 50%{opacity:0.3}
 }
@@ -1043,6 +1220,38 @@ header {
   transition:all 0.2s;
 }
 .cctv-btn-close:hover { background:rgba(255,64,96,0.2); }
+
+/* ── 토스트 알림 ── */
+.toast-container {
+  position: fixed;
+  bottom: 28px; right: 28px;
+  z-index: 9999;
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cyan);
+  border-radius: 10px;
+  padding: 12px 18px;
+  font-family: var(--font-mono); font-size: 0.75rem;
+  color: var(--text);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  opacity: 0;
+  transform: translateX(40px);
+  transition: opacity 0.25s, transform 0.25s;
+  pointer-events: auto;
+  min-width: 220px;
+}
+.toast.show { opacity: 1; transform: translateX(0); }
+.toast.ok   { border-left-color: var(--green); }
+.toast.warn { border-left-color: var(--yellow); }
+.toast.fail { border-left-color: var(--red); }
+.toast.cam  { border-left-color: var(--purple); }
+.toast-icon { font-size: 1rem; flex-shrink: 0; }
+
 </style>
 </head>
 <body>
@@ -1284,11 +1493,48 @@ header {
           <button class="pir-mode-btn" id="pir-btn-wake" onclick="setPirMode('wake_mode')">
             <span class="pir-icon">☀️</span>기상
           </button>
+          <button class="pir-mode-btn" id="pir-btn-dnd" onclick="setPirMode('dnd_mode')">
+            <span class="pir-icon">🔕</span>방해금지
+          </button>
         </div>
         <div class="pir-status-bar">
           <div class="pir-status-dot off" id="pir-status-dot"></div>
           <span class="pir-status-text" id="pir-status-text">PIR 비활성 — 모드를 선택하세요</span>
         </div>
+      </div>
+
+      <!-- 현관 CAM 카드 -->
+      <div class="device-card" id="card-cam" style="--card-accent:#00C8FF; margin-top:0;">
+        <div class="device-header">
+          <div class="device-name">📷 현관 카메라 (ESP32-CAM)</div>
+          <div class="cam-status-wrap">
+            <div class="cam-dot offline" id="camDot"></div>
+            <span id="camStatusText">대기 중</span>
+          </div>
+        </div>
+
+        <!-- 스트림 영역 -->
+        <div class="cam-stream-wrap" id="camStreamWrap">
+          <div class="cam-placeholder" id="camPlaceholder">
+            <span>📷</span>
+            <span>스트림 연결 중...</span>
+            <span>UDP :5005</span>
+          </div>
+          <img id="camStream" src="" alt="현관 카메라"
+               style="display:none;"
+               onerror="onCamError()" onload="onCamLoad()">
+          <div class="cam-verdict-badge" id="camVerdictBadge"></div>
+          <div class="cam-rec-dot" id="camRecDot">
+            <span class="cam-rec-blink">●</span> LIVE
+          </div>
+        </div>
+
+        <!-- 하단 정보바 -->
+        <div class="cam-info-row">
+          <button class="cam-btn-snapshot" onclick="camSnapshot()">📸 스냅샷</button>
+          <button class="cam-btn-snapshot" onclick="camToggleStream()" id="camToggleBtn">▶ 스트림 시작</button>
+        </div>
+        <div class="cam-last-event" id="camLastEvent">마지막 이벤트: —</div>
       </div>
 
   </div><!-- /devices-section -->
@@ -1318,6 +1564,26 @@ header {
 
 </div>
 
+<!-- ESP32-CAM 침입 알람 모달 -->
+<div class="cam-alert-overlay" id="camAlertModal">
+  <div class="cam-alert-box">
+    <div class="cam-alert-header">
+      <span style="font-size:1.4rem;">🚨</span>
+      <h3 id="camAlertTitle">현관 미등록 인물 감지</h3>
+      <span class="cam-alert-conf" id="camAlertConf"></span>
+    </div>
+    <div class="cam-alert-snap">
+      <img id="camAlertImg" src="" alt="현관 스냅샷">
+      <div class="cam-alert-snap-ts" id="camAlertTs"></div>
+    </div>
+    <div class="cam-alert-msg" id="camAlertMsg">현관에서 미등록 인물이 감지되었습니다. 즉시 확인하세요.</div>
+    <div class="cam-alert-actions">
+      <button class="cam-btn-confirm" onclick="camAlertConfirm()">✅ 확인 — 경고 해제</button>
+      <button class="cam-btn-modal-close" onclick="camAlertClose()">✕ 닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- DB 이벤트 로그 검색 모달 -->
 <div class="dblog-overlay" id="dblogOverlay">
   <div class="dblog-modal">
@@ -1325,6 +1591,7 @@ header {
       <div class="dblog-title">EVENT LOG DATABASE</div>
       <button class="dblog-close" onclick="closeDbLog()">ESC 닫기</button>
     </div>
+
 
     <!-- 탭 바 -->
     <div class="dblog-tabs">
@@ -1509,8 +1776,8 @@ header {
 
     </div><!-- /dbTabPattern -->
 
-  </div>
-</div>
+  </div><!-- /dblog-modal -->
+</div><!-- /dblog-overlay -->
 
 <!-- CCTV 보안 모달 -->
 <div class="cctv-modal-overlay" id="cctvModal">
@@ -1522,7 +1789,7 @@ header {
       <span class="cctv-modal-time" id="cctvAlertTime">--:--:--</span>
     </div>
     <div class="cctv-feed" id="cctvFeed">
-      <img id="cctvImg" src="/camera/stream" alt="CCTV"
+      <img id="cctvImg" src="/camera/entrance/stream" alt="CCTV"
         onerror="showCctvError()" onload="hideCctvError()">
       <div class="cctv-feed-error" id="cctvError">
         <span style="font-size:2rem;">📷</span>
@@ -1568,6 +1835,8 @@ function connectWS() {
     setWsStatus(true);
     log('WebSocket 연결', 'info');
     clearTimeout(wsRetryTimer);
+    // 서버 상태 요청 → pir_mode 동기화
+    setTimeout(() => sendWS({ type:'llm_cmd', cmd:'status', device_id:'esp32_home', target:'all' }), 300);
   };
 
   ws.onclose = () => {
@@ -1666,6 +1935,15 @@ function handleServerMsg(data) {
   }
   else if (type === 'pir_alert') {
     handlePirAlert(data);
+  }
+  else if (type === 'cam_alert') {
+    handleCamAlert(data);
+  }
+  else if (type === 'cam_notify') {
+    handleCamNotify(data);
+  }
+  else if (type === 'cam_verdict') {
+    handleCamVerdict(data);
   }
   else if (type === 'bathroom_temp_set') {
     setBathroomTempDisplay(data.value);
@@ -2399,13 +2677,19 @@ const PIR_MODE_CONFIG = {
   home_mode:  { btnId:'pir-btn-home',  activeClass:'active-home',  dot:'presence', text:'🏠 귀가 모드 — 재실 감지 중 (장시간 정적 시 알림)' },
   sleep_mode: { btnId:'pir-btn-sleep', activeClass:'active-sleep', dot:'guard',    text:'🌙 취침 모드 — 거실 방범 감시 중' },
   wake_mode:  { btnId:'pir-btn-wake',  activeClass:'active-wake',  dot:'presence', text:'☀️ 기상 모드 — 재실 감지 중' },
+  dnd_mode:   { btnId:'pir-btn-dnd',   activeClass:'active-dnd',   dot:'dnd',      text:'🔕 방해금지 모드 — 모든 알람·팝업 무시, 로그 기록 유지' },
 };
 
 function setPirMode(cmd) {
   sendWS({ type:'llm_cmd', cmd:cmd, device_id:'esp32_home' });
   _updatePirUI(cmd);
-  const labels = { away_mode:'외출', home_mode:'귀가', sleep_mode:'취침', wake_mode:'기상' };
-  log(`🔒 PIR 모드 설정: ${labels[cmd]}`, 'info');
+  localStorage.setItem('pir_mode', cmd);
+  const labels = { away_mode:'외출', home_mode:'귀가', sleep_mode:'취침', wake_mode:'기상', dnd_mode:'방해금지' };
+  if (cmd === 'dnd_mode') {
+    log('🔕 방해금지 모드 활성화 — 알람·팝업 차단 / 이상 탐지 로그 기록 유지', 'warn');
+  } else {
+    log(`🔒 PIR 모드 설정: ${labels[cmd]}`, 'info');
+  }
 }
 
 function _updatePirUI(cmd) {
@@ -2438,6 +2722,13 @@ function _updatePirUI(cmd) {
 function handlePirAlert(data) {
   const msg   = data.msg   || 'PIR 알림';
   const event = data.event || '';
+  const ctx   = data.context || '';
+
+  // 방해금지 모드: 이상 탐지 로그는 붉은 색으로 유지, 알람·팝업만 차단
+  if (_currentPirMode === 'dnd_mode') {
+    log(`🔕 [방해금지] ${msg}`, 'fail');  // 붉은 로그 유지
+    return;  // 팝업·알람 차단
+  }
 
   // 알림 뱃지 갱신
   const badge = document.getElementById('pir-alert-badge');
@@ -2472,7 +2763,7 @@ function openCctvModal(alertMsg) {
 
   // 스트림 이미지 새로고침 (캐시 방지)
   const img = document.getElementById('cctvImg');
-  img.src = '/camera/stream?' + Date.now();
+  img.src = '/camera/entrance/snapshot?' + Date.now();
 
   document.getElementById('cctvError').classList.remove('show');
   modal.classList.add('show');
@@ -2486,7 +2777,9 @@ function closeCctvModal() {
 
 function dismissAlert() {
   closeCctvModal();
-  log('✅ 보안 경고 해제', 'ok');
+  // 서버에 pir_dismiss 명령 전송 → LED 스냅샷 복원 또는 all_off
+  sendCmd({ cmd: 'pir_dismiss', device_id: 'esp32_home' });
+  log('✅ 보안 경고 해제 — LED 복원 중...', 'ok');
   const badge = document.getElementById('pir-alert-badge');
   badge.className   = 'pir-alert-badge';
   badge.textContent = '감시 중';
@@ -2504,6 +2797,14 @@ function hideCctvError() {
 
 // ── 음성 PIR 모드 전환 UI 동기화 (v3) ───────────────────────
 function syncPirModeFromResult(data) {
+  // 0순위: 서버가 pir_mode 필드를 직접 반환한 경우 (status 응답 동기화)
+  if (data.pir_mode) {
+    _updatePirUI(data.pir_mode);
+    localStorage.setItem('pir_mode', data.pir_mode);
+    log('🔄 PIR 모드 복원: ' + data.pir_mode, 'info');
+    return;
+  }
+
   const msg = data.msg || '';
 
   // 1순위: context=xxx 정규식 추출 (가장 정확)
@@ -2516,18 +2817,19 @@ function syncPirModeFromResult(data) {
       'wake':  'wake_mode',
     };
     const cmd = contextMap[ctxMatch[1]];
-    if (cmd) { _updatePirUI(cmd); return; }
+    if (cmd) { _updatePirUI(cmd); localStorage.setItem('pir_mode', cmd); return; }
   }
 
-  // 2순위: 한국어 모드명 전체 매칭 (단어 오매칭 방지)
+  // 2순위: 한국어 모드명 전체 매칭 (dnd 포함)
   const krMap = [
     ['외출 모드', 'away_mode'],
     ['귀가 모드', 'home_mode'],
     ['취침 모드', 'sleep_mode'],
     ['기상 모드', 'wake_mode'],
+    ['방해금지 모드', 'dnd_mode'],
   ];
   for (const [kw, cmd] of krMap) {
-    if (msg.includes(kw)) { _updatePirUI(cmd); return; }
+    if (msg.includes(kw)) { _updatePirUI(cmd); localStorage.setItem('pir_mode', cmd); return; }
   }
 }
 function log(msg, type = 'info') {
@@ -2540,6 +2842,30 @@ function log(msg, type = 'info') {
   list.scrollTop = list.scrollHeight;
 
   // 최대 100개
+  while (list.children.length > 100) list.removeChild(list.firstChild);
+}
+
+// ── 침입 알람 전용 로그 (Command Log 강조 출력) ──────────────────────
+function logAlarm(msg, conf, ts) {
+  const list = document.getElementById('logList');
+  const item = document.createElement('div');
+  item.className = 'log-item alarm';
+
+  const timeStr = ts
+    ? new Date(ts * 1000).toLocaleTimeString('ko-KR', {hour12:false})
+    : new Date().toLocaleTimeString('ko-KR', {hour12:false});
+
+  const confBadge = conf
+    ? `<span class="log-badge">신뢰도 ${Math.round(conf * 100)}%</span>`
+    : '';
+
+  item.innerHTML =
+    `<span class="log-time">${timeStr}</span>` +
+    `<span class="log-msg">🚨 ${msg}${confBadge}</span>`;
+
+  list.appendChild(item);
+  list.scrollTop = list.scrollHeight;
+
   while (list.children.length > 100) list.removeChild(list.firstChild);
 }
 
@@ -3141,7 +3467,317 @@ window.onload = () => {
   updateTrackUI();
   loadYouTubeAPI();
   drawHouse();  // 3D 하우스 초기 렌더링
+
+  // localStorage 백업에서 PIR 모드 즉시 복원 (서버 응답 전 UI 선반영)
+  const savedMode = localStorage.getItem('pir_mode');
+  if (savedMode && PIR_MODE_CONFIG[savedMode]) {
+    _updatePirUI(savedMode);
+    log('🔄 PIR 모드 복원 (로컬): ' + savedMode, 'info');
+  }
 };
+
+
+// ════════════════════════════════════════════
+// 토스트 알림 모듈
+// ════════════════════════════════════════════
+function showToast(msg, type = 'ok', duration = 3000) {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+
+  const iconMap = { ok: '✅', warn: '⚠️', fail: '❌', cam: '📷', info: 'ℹ️' };
+  const icon = iconMap[type] || 'ℹ️';
+
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  toast.innerHTML = `<span class="toast-icon">${icon}</span><span>${msg}</span>`;
+  container.appendChild(toast);
+
+  // 등장 애니메이션
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => toast.classList.add('show'));
+  });
+
+  // 자동 제거
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
+// ════════════════════════════════════════════
+// 현관 ESP32-CAM 카메라 모듈
+// ════════════════════════════════════════════
+let _camStreaming  = false;
+let _camAlarmOsc  = null;
+let _audioCtx     = null;
+
+function _getAudioCtx() {
+  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return _audioCtx;
+}
+
+// ── 스트림 토글 ──────────────────────────────
+function camToggleStream() {
+  const img    = document.getElementById('camStream');
+  const ph     = document.getElementById('camPlaceholder');
+  const btn    = document.getElementById('camToggleBtn');
+  if (_camStreaming) {
+    img.src = '';
+    img.style.display = 'none';
+    ph.style.display  = 'flex';
+    btn.textContent   = '▶ 스트림 시작';
+    document.getElementById('camRecDot').classList.remove('active');
+    document.getElementById('camDot').className = 'cam-dot offline';
+    document.getElementById('camStatusText').textContent = '대기 중';
+    _camStreaming = false;
+    showToast('📷 현관 카메라 스트림 중지', 'warn', 2500);
+    log('📷 현관 카메라 스트림 중지', 'warn');
+  } else {
+    ph.style.display  = 'none';
+    img.style.display = 'block';
+    img.src = '/camera/entrance/stream?' + Date.now();
+    btn.textContent = '■ 스트림 중지';
+    _camStreaming = true;
+    showToast('📷 현관 카메라 스트림 연결 중...', 'cam', 2500);
+    log('📷 현관 카메라 스트림 시작', 'info');
+  }
+}
+
+function onCamLoad() {
+  document.getElementById('camDot').className = 'cam-dot live';
+  document.getElementById('camStatusText').textContent = 'LIVE';
+  document.getElementById('camRecDot').classList.add('active');
+  showToast('📷 현관 카메라 연결됨 — LIVE', 'ok', 3000);
+  log('📷 현관 카메라 스트림 연결 성공', 'ok');
+}
+
+function onCamError() {
+  document.getElementById('camDot').className = 'cam-dot offline';
+  document.getElementById('camStatusText').textContent = '연결 실패';
+  document.getElementById('camRecDot').classList.remove('active');
+  showToast('📷 현관 카메라 연결 실패 — 5초 후 재시도', 'fail', 4000);
+  log('📷 현관 카메라 연결 실패 — 5초 후 재시도', 'fail');
+  // 5초 후 재시도
+  if (_camStreaming) {
+    setTimeout(() => {
+      const img = document.getElementById('camStream');
+      img.src = '/camera/entrance/stream?' + Date.now();
+    }, 5000);
+  }
+}
+
+// ── 스냅샷 저장 ──────────────────────────────
+async function camSnapshot() {
+  try {
+    const res  = await fetch('/camera/entrance/snapshot?' + Date.now());
+    if (!res.ok) { log('스냅샷 실패 — 카메라 확인', 'fail'); return; }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'entrance_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.jpg';
+    a.click();
+    URL.revokeObjectURL(url);
+    log('📸 스냅샷 저장됨', 'ok');
+  } catch(e) {
+    log('스냅샷 오류: ' + e.message, 'fail');
+  }
+}
+
+// ── 판정 배지 업데이트 ───────────────────────
+function updateCamBadge(level, msg) {
+  const badge = document.getElementById('camVerdictBadge');
+  badge.className   = 'cam-verdict-badge ' + level;
+  badge.textContent = msg;
+  if (level === 'clear') setTimeout(() => { badge.className = 'cam-verdict-badge'; }, 3000);
+}
+
+// ── cam_alert 처리 (intruder / delivery) ─────
+function handleCamAlert(data) {
+  const level = data.level;
+  const msg   = data.msg || '';
+  const conf  = data.confidence || 0;
+  const ts    = new Date((data.timestamp || Date.now()/1000) * 1000)
+                  .toLocaleTimeString('ko-KR', {hour12:false});
+
+  document.getElementById('camLastEvent').textContent = '마지막: ' + msg + ' (' + ts + ')';
+
+  // ── 방해금지 모드: 알람·팝업 차단, 이상 탐지 로그는 그대로 붉은 색으로 기록 ──
+  if (_currentPirMode === 'dnd_mode') {
+    if (level === 'intruder') {
+      logAlarm('현관 미등록 인물 감지 — ' + msg, conf, data.timestamp);  // 붉은 로그 유지
+    } else if (level === 'delivery') {
+      log('📦 ' + msg + ' [방해금지 — 알람 무시]', 'warn');
+    }
+    document.getElementById('camLastEvent').textContent = '마지막: ' + msg + ' (' + ts + ') [방해금지]';
+    return;  // 알람음·팝업 차단
+  }
+
+  if (level === 'intruder') {
+    // Command Log 알람 (강조 스타일)
+    logAlarm('현관 미등록 인물 감지 — ' + msg, conf, data.timestamp);
+
+    // 상태 도트 → 빨간 경고
+    document.getElementById('camDot').className = 'cam-dot alert';
+    updateCamBadge('intruder', '🚨 미등록 인물');
+
+    // 알람음 시작
+    startCamAlarm();
+
+    // 모달 팝업
+    document.getElementById('camAlertTitle').textContent =
+      '🚨 현관 미등록 인물 감지';
+    document.getElementById('camAlertConf').textContent =
+      conf ? '신뢰도 ' + Math.round(conf * 100) + '%' : '';
+    document.getElementById('camAlertMsg').textContent =
+      '현관에서 미등록 인물이 감지되었습니다. 즉시 확인하세요.';
+    document.getElementById('camAlertTs').textContent = ts;
+    // 스냅샷 로드
+    document.getElementById('camAlertImg').src =
+      '/camera/entrance/snapshot?' + Date.now();
+    document.getElementById('camAlertModal').classList.add('show');
+
+  } else if (level === 'delivery') {
+    updateCamBadge('delivery', '📦 택배');
+    playDeliveryBeep();
+    // 기존 CCTV 모달 재사용 (PIR 스타일)
+    openCctvModal(msg);
+    log('📦 ' + msg, 'warn');
+  }
+}
+
+// ── cam_notify 처리 (known) ──────────────────
+function handleCamNotify(data) {
+  const msg = data.msg || '';
+  const ts  = new Date((data.timestamp || Date.now()/1000) * 1000)
+                .toLocaleTimeString('ko-KR', {hour12:false});
+  updateCamBadge('known', msg);
+  document.getElementById('camLastEvent').textContent = '마지막: ' + msg + ' (' + ts + ')';
+  log('✅ ' + msg, 'ok');
+}
+
+// ── cam_verdict 처리 (매 분석 결과 → Command Log) ───────────
+const _verdictLog = {
+  clear:    { color: '#5A7090', next: 'none' },
+  known:    { color: '#00FF88', next: 'unlock' },
+  delivery: { color: '#FFB400', next: 'notify' },
+  intruder: { color: '#FF4060', next: 'alarm' },
+};
+const _verdictActionLabel = {
+  none:   '대기',
+  unlock: '현관 잠금 해제 가능',
+  notify: '택배 알림 전송 가능',
+  alarm:  '경보 발령 / 녹화 시작',
+};
+let _lastVerdictLabel = '';   // 연속 동일 라벨 중복 로그 방지
+
+function handleCamVerdict(data) {
+  const label  = data.label  || 'clear';
+  const icon   = data.icon   || '⬜';
+  const text   = data.text   || label;
+  const action = data.action || 'none';
+  const conf   = data.confidence || 0;
+  const name   = data.name   || '';
+  const ts     = new Date((data.timestamp || Date.now()/1000) * 1000)
+                   .toLocaleTimeString('ko-KR', {hour12:false});
+
+  // clear 는 로그 생략 (노이즈 방지)
+  if (label === 'clear') {
+    _lastVerdictLabel = label;
+    return;
+  }
+
+  // 동일 라벨 연속 시 5초에 1회만 로그
+  const now = Date.now();
+  if (label === _lastVerdictLabel) {
+    if (!handleCamVerdict._lastLogTs) handleCamVerdict._lastLogTs = {};
+    const last = handleCamVerdict._lastLogTs[label] || 0;
+    if (now - last < 5000) return;
+    handleCamVerdict._lastLogTs[label] = now;
+  } else {
+    if (!handleCamVerdict._lastLogTs) handleCamVerdict._lastLogTs = {};
+    handleCamVerdict._lastLogTs[label] = now;
+    _lastVerdictLabel = label;
+  }
+
+  // Command Log 기록
+  const meta   = _verdictLog[label] || { color: '#5A7090', next: 'none' };
+  const confTxt = conf > 0 ? ` | 신뢰도 ${Math.round(conf*100)}%` : '';
+  const nextAct = _verdictActionLabel[action] || action;
+
+  log(
+    `${icon} [CAM] ${text}${confTxt} → 다음액션: ${nextAct}`,
+    label === 'intruder' ? 'fail' :
+    label === 'known'    ? 'ok'   :
+    label === 'delivery' ? 'warn' : 'info'
+  );
+
+  // 카메라 배지도 업데이트
+  updateCamBadge(label,
+    label === 'known'    ? `✅ ${name || '등록 인물'}` :
+    label === 'delivery' ? '📦 택배' :
+    label === 'intruder' ? '🚨 미등록 인물' : ''
+  );
+}
+
+// ── 알람 모달 액션 ───────────────────────────
+function camAlertConfirm() {
+  stopCamAlarm();
+  document.getElementById('camDot').className = _camStreaming ? 'cam-dot live' : 'cam-dot offline';
+  updateCamBadge('clear', 'CLEAR');
+  camAlertClose();
+  // LED 복원 (PIR 스냅샷 복원 또는 all_off)
+  sendCmd({ cmd: 'pir_dismiss', device_id: 'esp32_home' });
+  log('✅ 현관 경고 해제 — LED 복원 중...', 'ok');
+}
+function camAlertClose() {
+  document.getElementById('camAlertModal').classList.remove('show');
+  document.getElementById('camAlertImg').src = '';
+}
+
+// ── Web Audio 알람음 ─────────────────────────
+function startCamAlarm() {
+  if (_camAlarmOsc) return;
+  const ctx  = _getAudioCtx();
+  const osc  = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(880, ctx.currentTime);
+  gain.gain.setValueAtTime(0.35, ctx.currentTime);
+  let hi = false;
+  const iv = setInterval(() => {
+    if (!_camAlarmOsc) { clearInterval(iv); return; }
+    hi = !hi;
+    osc.frequency.setValueAtTime(hi ? 1100 : 880, ctx.currentTime);
+  }, 500);
+  osc.start();
+  _camAlarmOsc = osc;
+}
+
+function stopCamAlarm() {
+  if (!_camAlarmOsc) return;
+  try { _camAlarmOsc.stop(); } catch(e) {}
+  _camAlarmOsc = null;
+}
+
+function playDeliveryBeep() {
+  const ctx  = _getAudioCtx();
+  const osc  = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.type = 'sine';
+  osc.frequency.value = 660;
+  gain.gain.setValueAtTime(0.25, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.5);
+}
+// ════ END CAM MODULE ═══════════════════════════
 </script>
+
+<div class="toast-container" id="toastContainer"></div>
 </body>
 </html>

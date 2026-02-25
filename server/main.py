@@ -1,7 +1,25 @@
 """
 server/main.py
 ==============
-Voice IoT Controller - 진입점 v0.7
+Voice IoT Controller - 진입점 v0.8
+
+v0.8 변경사항:
+  - ESP32-CAM UDP 기반 현관 보안 카메라 시스템 통합
+  - camera_stream.py  : UDP 수신 스레드 + MJPEG WebSocket 스트리밍
+  - frame_analyzer.py : InsightFace 얼굴인식 + YOLOv8 객체감지
+  - face_db.py        : 등록 얼굴 DB REST API 라우터
+  - 신규 엔드포인트:
+      GET  /camera/entrance/stream    MJPEG HTTP 스트림
+      GET  /camera/entrance/snapshot  스냅샷 JPEG 1장
+      GET  /face-db/list              등록 인물 목록
+      POST /face-db/register          얼굴 등록 (multipart)
+      DEL  /face-db/{name}            인물 삭제
+      POST /face-db/rebuild           DB 재빌드
+  - 신규 WS 메시지 타입:
+      cam_alert  : 미등록 인물 / 택배 감지 알람
+      cam_notify : 등록 얼굴 귀가 알림
+  - lifespan에 cam_start / FrameAnalyzer 초기화 / analysis_loop task 추가
+  - app.state에 camera_stream / frame_analyzer 바인딩
 
 v0.7 변경사항:
   - PIR 이벤트 수신 엔드포인트 추가: POST /pir-event
@@ -28,6 +46,7 @@ v0.4 변경사항:
   - LLMEngine (Ollama) 생성 → CommandRouter 주입
   - STTEngine (Whisper + 웨이크 워드) 생성 → 음성 파이프라인 연결
   - TTSEngine (Kokoro / ElevenLabs / edge-tts) 생성 → LLM 응답 음성 출력
+  - CameraStream (ESP32-CAM UDP) 생성 → FrameAnalyzer + WS 알람 연결
   - FastAPI lifespan 으로 TCP 서버 + STT 엔진 동시 구동
   - uvicorn 으로 HTTP/WebSocket 서버 실행
 
@@ -38,12 +57,21 @@ v0.4 변경사항:
                                         ↓
                                    TTSEngine → 스피커
 
+  ESP32-CAM → UDP → CameraStream → FrameAnalyzer
+                                        ↓
+                              cam_alert / cam_notify
+                                        ↓
+                               WS → 웹앱 알람 + 영상
+
 실행:
   cd ~/dev_ws/voice_iot_controller
   uvicorn server.main:app --host 0.0.0.0 --port 8000
 
   STT 없이 실행 (서버만):
   DISABLE_STT=1 uvicorn server.main:app --host 0.0.0.0 --port 8000
+
+  카메라 없이 실행:
+  DISABLE_CAM=1 uvicorn server.main:app --host 0.0.0.0 --port 8000
 
   TTS 없이 실행:
   DISABLE_TTS=1 uvicorn server.main:app --host 0.0.0.0 --port 8000
@@ -60,7 +88,8 @@ from pathlib import Path
 
 import yaml
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from server.tcp_server     import TCPServer
@@ -112,6 +141,7 @@ def create_app() -> FastAPI:
     disable_llm = os.getenv("DISABLE_LLM", "0") == "1"
     disable_tts = os.getenv("DISABLE_TTS", "0") == "1"
     disable_db  = os.getenv("DISABLE_DB",  "0") == "1"
+    disable_cam = os.getenv("DISABLE_CAM", "0") == "1"   # v0.8 신규
 
     # ════════════════════════════════════════════
     # 1. 핵심 인스턴스 생성
@@ -222,6 +252,20 @@ def create_app() -> FastAPI:
     else:
         logger.warning("STT 비활성화 (DISABLE_STT=1) → 수동 입력만 사용")
 
+    # ── v0.8: 카메라 스트림 + FrameAnalyzer ──────────────────────────
+    frame_analyzer = None
+    if not disable_cam:
+        try:
+            from server.frame_analyzer import FrameAnalyzer
+            frame_analyzer = FrameAnalyzer()
+            logger.info("FrameAnalyzer 생성 완료")
+        except ImportError as e:
+            logger.warning(f"[CAM] FrameAnalyzer import 실패 (패키지 미설치): {e}")
+            logger.warning("[CAM] pip install opencv-python-headless ultralytics insightface onnxruntime")
+            disable_cam = True
+    else:
+        logger.warning("카메라 비활성화 (DISABLE_CAM=1)")
+
     # ════════════════════════════════════════════
     # 2. 상호 의존성 연결
     # ════════════════════════════════════════════
@@ -237,7 +281,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        _print_banner(cfg, stt_engine, llm_engine, tts_engine, db_logger)
+        _print_banner(cfg, stt_engine, llm_engine, tts_engine, db_logger, disable_cam)
 
         # TCP 서버 시작
         await tcp_server.start()
@@ -282,6 +326,53 @@ def create_app() -> FastAPI:
         poll_task = asyncio.create_task(tcp_server.start_polling(interval=poll_interval))
         logger.info(f"[State] 주기적 상태 폴링 시작 (interval={poll_interval}s)")
 
+        # ── v0.8: 카메라 스트림 시작 ────────────────────────────────
+        analysis_task: asyncio.Task | None = None
+        if not disable_cam and frame_analyzer is not None:
+            import server.camera_stream as cam_mod
+
+            # ESP-CAM 설정 (settings.yaml camera 블록 있으면 사용)
+            _cam_cfg    = cfg.get("camera", {})
+            _udp_port   = _cam_cfg.get("udp_port",   5005)
+            _multipart  = _cam_cfg.get("multipart",  False)
+            _analyze_n  = _cam_cfg.get("analyze_every", 10)
+
+            cam_mod.UDP_PORT       = _udp_port
+            cam_mod.ANALYZE_EVERY  = _analyze_n
+
+            # UDP 수신 스레드 시작
+            cam_mod.start(multipart=_multipart)
+            logger.info(
+                f"[CAM] UDP 수신 시작 — port={_udp_port} "
+                f"multipart={_multipart} analyze_every={_analyze_n}"
+            )
+
+            # FrameAnalyzer 모델 로드
+            await frame_analyzer.load()
+            logger.info("[CAM] FrameAnalyzer 모델 로드 완료")
+
+            # face_db 라우터에 analyzer 주입
+            try:
+                from server import face_db as face_db_mod
+                face_db_mod.set_analyzer(frame_analyzer)
+                logger.info("[CAM] face_db analyzer 주입 완료")
+            except ImportError:
+                logger.warning("[CAM] face_db 모듈 없음 — 얼굴 DB API 비활성화")
+
+            # TTS speak 래퍼 (tts_engine 없으면 None)
+            async def _tts_speak(text: str):
+                if tts_engine:
+                    await tts_engine.speak(text)
+
+            # 분석 루프 asyncio task
+            analysis_task = asyncio.create_task(
+                cam_mod.analysis_loop(
+                    ws_broadcast_fn=ws_hub.broadcast,
+                    tts_fn=_tts_speak,
+                )
+            )
+            logger.info("[CAM] analysis_loop task 시작")
+
         logger.info("=" * 50)
         logger.info("서버 준비 완료 - 요청 대기 중")
         logger.info("=" * 50)
@@ -303,6 +394,13 @@ def create_app() -> FastAPI:
         if poll_task:
             poll_task.cancel()
 
+        # v0.8: 카메라 종료
+        if not disable_cam and analysis_task:
+            analysis_task.cancel()
+            import server.camera_stream as cam_mod
+            cam_mod.stop()
+            logger.info("[CAM] 카메라 스트림 종료")
+
         if llm_engine:
             await llm_engine.close()
 
@@ -320,7 +418,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Voice IoT Controller",
         description="음성 명령 기반 ESP32 IoT 디바이스 제어 시스템",
-        version="0.6.0",
+        version="0.8.0",
         lifespan=lifespan,
     )
 
@@ -329,7 +427,7 @@ def create_app() -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    # 라우터 등록
+    # 기존 라우터 등록
     api_router = create_router(
         tcp_server=tcp_server,
         ws_hub=ws_hub,
@@ -338,10 +436,16 @@ def create_app() -> FastAPI:
     )
     app.include_router(api_router)
 
-    # ── PIR 이벤트 엔드포인트 (ESP32 → 서버) ────────────────────────
-    from fastapi import Request
-    from fastapi.responses import JSONResponse
+    # ── v0.8: face_db 라우터 등록 ───────────────────────────────────
+    if not disable_cam:
+        try:
+            from server.face_db import router as face_db_router
+            app.include_router(face_db_router)
+            logger.info("[CAM] face_db 라우터 등록 완료 (/face-db/*)")
+        except ImportError:
+            logger.warning("[CAM] face_db 라우터 등록 실패 — 모듈 없음")
 
+    # ── PIR 이벤트 엔드포인트 (ESP32 → 서버) ────────────────────────
     @app.post("/pir-event")
     async def pir_event(request: Request):
         """
@@ -390,13 +494,91 @@ def create_app() -> FastAPI:
 
         return JSONResponse({"status": "ok", "msg": alert_msg})
 
-    # 인스턴스 바인딩 (디버그 / 테스트용)
+    # ── v0.8: 카메라 엔드포인트 ─────────────────────────────────────
+    @app.get("/camera/entrance/stream")
+    async def camera_entrance_stream():
+        """
+        현관 ESP32-CAM MJPEG HTTP 스트림
+        웹앱: <img src="/camera/entrance/stream">
+        """
+        if disable_cam:
+            return JSONResponse(
+                {"status": "error", "msg": "카메라 비활성화 (DISABLE_CAM=1)"},
+                status_code=503,
+            )
+        try:
+            from server.camera_stream import mjpeg_generator
+        except ImportError:
+            return JSONResponse(
+                {"status": "error", "msg": "camera_stream 모듈 없음"},
+                status_code=503,
+            )
+        return StreamingResponse(
+            mjpeg_generator(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control":    "no-cache, no-store, must-revalidate",
+                "Pragma":           "no-cache",
+                "X-Accel-Buffering":"no",   # nginx reverse proxy 버퍼링 비활성화
+            },
+        )
+
+    @app.get("/camera/entrance/snapshot")
+    async def camera_entrance_snapshot():
+        """
+        현관 ESP32-CAM 현재 프레임 스냅샷 1장 반환 (JPEG)
+        알람 모달 팝업 시 사용
+        """
+        if disable_cam:
+            return JSONResponse(
+                {"status": "error", "msg": "카메라 비활성화"},
+                status_code=503,
+            )
+        try:
+            from server.camera_stream import get_latest_jpeg
+        except ImportError:
+            return JSONResponse(
+                {"status": "error", "msg": "camera_stream 모듈 없음"},
+                status_code=503,
+            )
+        jpeg = get_latest_jpeg()
+        if jpeg is None:
+            return JSONResponse(
+                {"status": "error", "msg": "프레임 없음 — ESP32-CAM 연결 확인"},
+                status_code=503,
+            )
+        return Response(
+            content=jpeg,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    @app.get("/camera/entrance/status")
+    async def camera_entrance_status():
+        """카메라 + 분석기 현재 상태 조회"""
+        if disable_cam:
+            return JSONResponse({"active": False, "reason": "DISABLE_CAM=1"})
+        try:
+            from server.camera_stream import get_latest_jpeg, _last_verdict
+            has_frame = get_latest_jpeg() is not None
+            return JSONResponse({
+                "active":    has_frame,
+                "verdict":   _last_verdict.get("label", "clear"),
+                "name":      _last_verdict.get("name"),
+                "confidence":_last_verdict.get("confidence", 0.0),
+                "timestamp": _last_verdict.get("timestamp", 0.0),
+            })
+        except ImportError:
+            return JSONResponse({"active": False, "reason": "모듈 없음"})
+
+    # ── 인스턴스 바인딩 (디버그 / 테스트용) ──────────────────────────
     app.state.tcp_server     = tcp_server
     app.state.ws_hub         = ws_hub
     app.state.command_router = command_router
     app.state.llm_engine     = llm_engine
     app.state.stt_engine     = stt_engine
     app.state.tts_engine     = tts_engine
+    app.state.frame_analyzer = frame_analyzer   # v0.8 신규
     app.state.db_logger      = db_logger
     app.state.settings       = cfg
 
@@ -420,6 +602,12 @@ def _make_stt_callback(
     """
     async def on_stt_result(text: str):
         import time
+
+        # TTS 재생 중 마이크 수음 방지 — 루프 차단
+        if tts_engine and tts_engine.is_speaking:
+            logger.info(f"[STT] TTS 재생 중 — 입력 무시: '{text[:30]}'")
+            return
+
         logger.info(f"[Pipeline] STT → '{text}'")
 
         # DB 로그: 음성 인식 결과 (SR-3.1)
@@ -443,7 +631,6 @@ def _make_stt_callback(
         logger.info(f"[TIMER] ✅ [B] CommandRouter 완료: {tB1-tB0:.2f}s")
 
         # TTS 음성 답변 (논블로킹)
-        # command_router.handle() 이 반환한 result 에서 tts_response 추출
         tts_text = _extract_tts_response(result)
         if tts_text and tts_engine:
             asyncio.create_task(tts_engine.speak(tts_text))
@@ -536,13 +723,14 @@ async def _start_stt(stt_engine: STTEngine):
 # 시작 배너
 # ─────────────────────────────────────────────
 
-def _print_banner(cfg: dict, stt_engine, llm_engine, tts_engine, db_logger=None):
+def _print_banner(cfg: dict, stt_engine, llm_engine, tts_engine, db_logger=None, disable_cam: bool=False):
     _stt = cfg.get("stt", {})
     _tts = cfg.get("tts", {})
     _db  = cfg.get("database", {})
+    _cam = cfg.get("camera", {})
     w = 52
     logger.info("=" * w)
-    logger.info(" Voice IoT Controller  v0.7")
+    logger.info(" Voice IoT Controller  v0.8")
     logger.info("=" * w)
     logger.info(f"  TCP  : {cfg['server']['host']}:{cfg['server']['tcp_port']}")
     logger.info(f"  HTTP : 0.0.0.0:{cfg['server']['ws_port']}")
@@ -558,6 +746,12 @@ def _print_banner(cfg: dict, stt_engine, llm_engine, tts_engine, db_logger=None)
     _voice    = _tts.get(_provider, {}).get("voice", "") if _provider else ""
     logger.info(f"  TTS  : {'✅ ' + _provider + ' / ' + _voice if tts_engine else '⛔ 비활성화'}")
     logger.info(f"  DB   : {'✅ MySQL ' + _db.get('host','') + '/' + _db.get('db','') if db_logger else '⛔ 비활성화'}")
+    # v0.8 카메라 배너
+    if not disable_cam:
+        _udp_port = _cam.get("udp_port", 5005)
+        logger.info(f"  CAM  : ✅ ESP32-CAM UDP:{_udp_port} (InsightFace + YOLOv8)")
+    else:
+        logger.info(f"  CAM  : ⛔ 비활성화 (DISABLE_CAM=1)")
     logger.info("=" * w)
 
 

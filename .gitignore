@@ -201,6 +201,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Large model files
+models/kokoro-v0_19.onnx
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

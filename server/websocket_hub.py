@@ -122,10 +122,25 @@ class WebSocketHub:
         finally:
             await self._disconnect(client_id)
 
-    async def broadcast(self, message: str):
-        """연결된 모든 브라우저 클라이언트에게 메시지 전송"""
+    async def broadcast(self, message: str | dict):
+        """연결된 모든 브라우저 클라이언트에게 메시지 전송
+
+        Parameters
+        ----------
+        message : str 또는 dict
+            str  → 그대로 send_text()
+            dict → JSON 직렬화 후 send_text()
+        """
         if not self._clients:
             return
+
+        # dict → JSON 문자열 변환
+        if isinstance(message, dict):
+            try:
+                message = json.dumps(message, ensure_ascii=False)
+            except Exception as e:
+                logger.warning(f"[WS] broadcast JSON 직렬화 실패: {e}")
+                return
 
         dead: list[str] = []
         for client_id, ws in list(self._clients.items()):

@@ -125,6 +125,7 @@ class TTSEngine:
         self._el_client   = None
         self._lock        = asyncio.Lock()   # 동시 발화 방지
         self._available   = False
+        self.is_speaking  = False            # TTS 재생 중 STT 뮤트용 플래그
 
     # ── 초기화 ──────────────────────────────────────────────────────
 
@@ -227,6 +228,7 @@ class TTSEngine:
             return
 
         async with self._lock:
+            self.is_speaking = True
             try:
                 logger.info(
                     f"[TTS] 발화 시작: '{text[:30]}...'" if len(text) > 30
@@ -241,6 +243,8 @@ class TTSEngine:
                 logger.info("[TTS] 발화 완료")
             except Exception as e:
                 logger.error(f"[TTS] 발화 실패: {e}")
+            finally:
+                self.is_speaking = False  # 예외 발생해도 반드시 해제
 
     async def _speak_kokoro(self, text: str) -> None:
         import sounddevice as sd

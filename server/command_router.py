@@ -1,7 +1,7 @@
 """
 server/command_router.py
 ========================
-LLM/수동 JSON 명령 → ESP32 라우팅  v2.2
+LLM/수동 JSON 명령 → ESP32 라우팅  v2.4
 
 v2.2 변경사항:
   - PIR 모드 제어 액션 4종 추가:
@@ -128,6 +128,10 @@ class CommandRouter:
             settings.get("command_keywords", {})
         )
 
+        # 현재 PIR 모드 상태 (페이지 재로드 시 동기화용)
+        # None | "away_mode" | "home_mode" | "sleep_mode" | "wake_mode" | "dnd_mode"
+        self._current_pir_mode: Optional[str] = None
+
     # ── 공개 API ────────────────────────────────────────────────────
 
     async def handle(self, client_id: str, data: dict) -> str:
@@ -184,8 +188,12 @@ class CommandRouter:
             return await self._execute_all_broadcast(data)
 
         # cmd="away_mode"/"home_mode"/"sleep_mode"/"wake_mode" → PIR 모드 제어
-        if data.get("cmd") in ("away_mode", "home_mode", "sleep_mode", "wake_mode"):
+        if data.get("cmd") in ("away_mode", "home_mode", "sleep_mode", "wake_mode", "dnd_mode"):
             return await self._execute_pir_mode(data)
+
+        # cmd="pir_dismiss" → PIR 침입 알림 해제 (LED 처리)
+        if data.get("cmd") == "pir_dismiss":
+            return await self._execute_pir_dismiss(data)
 
         # cmd="set_bathroom_temp" → 욕실 희망온도 설정
         if data.get("cmd") == "set_bathroom_temp":
@@ -375,12 +383,15 @@ class CommandRouter:
 
     async def _execute_pir_mode(self, data: dict) -> str:
         """
-        PIR 모드 제어 (v2.2)
-        away_mode  → PIR guard  + 전체 조명 OFF
-        home_mode  → PIR presence
-        sleep_mode → PIR guard  (context: sleep)
-        wake_mode  → PIR presence
+        PIR 모드 제어 (v2.4)
+        away_mode  → LED 상태 저장 → PIR guard  + 전체 조명 OFF
+        home_mode  → PIR presence  → LED 이전 상태 복원
+        sleep_mode → LED 상태 저장 → PIR guard  (context: sleep)
+        wake_mode  → PIR presence  → LED 이전 상태 복원
         """
+        import asyncio
+        import json as _j
+
         cmd = data.get("cmd")
         tts = data.get("tts_response", "")
 
@@ -394,11 +405,36 @@ class CommandRouter:
             "home_mode":  ("presence", "home"),
             "sleep_mode": ("guard",    "sleep"),
             "wake_mode":  ("presence", "wake"),
+            "dnd_mode":   ("dnd",      "dnd"),
         }
         pir_mode, context = pir_map[cmd]
 
+        # 현재 PIR 모드 저장 (페이지 재로드 동기화용)
+        self._current_pir_mode = cmd
+
+        # ── dnd_mode: ESP32에 pir_mode:dnd 전송 (LED 켜지 않도록) ──
+        if pir_mode == "dnd":
+            payload = (_j.dumps({
+                "cmd": "pir_mode",
+                "mode": "dnd",
+                "context": "dnd",
+            }) + "\n").encode()
+            await self._tcp.send_command(DEVICE_HOME, payload)
+            logger.info("[Router] 방해금지 모드 — ESP32 pir_mode:dnd 전송 (LED 차단)")
+            msg = "방해금지 모드 설정 완료 — 모든 알람·팝업 무시, 로그 기록 유지"
+            return ws_cmd_result("ok", msg)
+
+        # ── guard 모드 진입: LED 상태 스냅샷 저장 ──────────────────
+        if pir_mode == "guard":
+            from protocol.schema import ROOM_LED_PIN
+            snapshot = {}
+            for room, pin in ROOM_LED_PIN.items():
+                if pin is not None:
+                    snapshot[f"led_{pin}"] = client.state.get(f"led_{pin}", 0)
+            client.state["_led_snapshot"] = snapshot
+            logger.info(f"[Router] PIR guard 진입 — LED 스냅샷 저장: {snapshot}")
+
         # ESP32에 pir_mode 명령 전송
-        import json as _j
         payload = (_j.dumps({
             "cmd": "pir_mode",
             "mode": pir_mode,
@@ -417,13 +453,37 @@ class CommandRouter:
                          f"PIR {pir_mode} 모드 설정 (context={context})",
                          device_id="esp32_home",
                          detail={"cmd": cmd, "pir_mode": pir_mode, "context": context})
-
-        # away_mode: 전체 조명 OFF 추가 실행
-        if cmd == "away_mode":
-            import asyncio
+        # ── away_mode / sleep_mode: 전체 조명 OFF ──────────────────
+        if cmd in ("away_mode", "sleep_mode"):
             await asyncio.sleep(0.2)
             await self._execute_all_broadcast({"cmd": "all_off"})
-            logger.info("[Router] away_mode: 전체 조명 OFF")
+            logger.info(f"[Router] {cmd}: 전체 조명 OFF")
+
+        # ── home_mode / wake_mode: 이전 LED 상태 복원 ──────────────
+        elif cmd in ("home_mode", "wake_mode"):
+            snapshot = client.state.pop("_led_snapshot", None)
+            if snapshot:
+                await asyncio.sleep(0.2)
+                from protocol.schema import ROOM_LED_PIN
+                restored = 0
+                for room, pin in ROOM_LED_PIN.items():
+                    if pin is None:
+                        continue
+                    prev_state = snapshot.get(f"led_{pin}", 0)
+                    state_str  = "on" if prev_state == 1 else "off"
+                    payload_led = self._build_payload({
+                        "cmd": "led", "room": room, "state": state_str
+                    })
+                    if payload_led and await self._tcp.send_command(DEVICE_HOME, payload_led):
+                        client.state[f"led_{pin}"] = prev_state
+                        restored += 1
+                logger.info(f"[Router] {cmd}: LED 이전 상태 복원 ({restored}개)")
+            else:
+                logger.info(f"[Router] {cmd}: LED 스냅샷 없음 — 복원 생략")
+
+            # 웹앱 상태 갱신
+            from protocol.schema import ws_device_update
+            await self._tcp._broadcast(ws_device_update(DEVICE_HOME, client.state))
 
         msg = f"PIR {pir_mode} 모드 설정 완료 (context={context})"
         if tts:
@@ -435,6 +495,49 @@ class CommandRouter:
             }, ensure_ascii=False)
 
         return ws_cmd_result("ok", msg)
+
+    async def _execute_pir_dismiss(self, data: dict) -> str:
+        """
+        PIR 침입 알림 해제 (v2.4)
+        guard 모드(외출/취침) → LED 스냅샷 복원, 없으면 all_off
+        presence 모드(귀가/기상) → all_off (이미 복원 완료 상태)
+        """
+        import asyncio
+        import json as _j
+
+        client = self._tcp.get_device(DEVICE_HOME)
+        if not client:
+            return ws_cmd_result("fail", "esp32_home 미연결")
+
+        snapshot = client.state.pop("_led_snapshot", None)
+
+        if snapshot:
+            # 스냅샷 있음 → 이전 LED 상태 복원
+            await asyncio.sleep(0.1)
+            from protocol.schema import ROOM_LED_PIN
+            restored = 0
+            for room, pin in ROOM_LED_PIN.items():
+                if pin is None:
+                    continue
+                prev_state = snapshot.get(f"led_{pin}", 0)
+                state_str  = "on" if prev_state == 1 else "off"
+                payload_led = self._build_payload({
+                    "cmd": "led", "room": room, "state": state_str
+                })
+                if payload_led and await self._tcp.send_command(DEVICE_HOME, payload_led):
+                    client.state[f"led_{pin}"] = prev_state
+                    restored += 1
+            logger.info(f"[Router] pir_dismiss: LED 스냅샷 복원 ({restored}개)")
+        else:
+            # 스냅샷 없음 → 전체 소등
+            await self._execute_all_broadcast({"cmd": "all_off"})
+            logger.info("[Router] pir_dismiss: 스냅샷 없음 — all_off 실행")
+
+        # 웹앱 상태 갱신 브로드캐스트
+        from protocol.schema import ws_device_update
+        await self._tcp._broadcast(ws_device_update(DEVICE_HOME, client.state))
+
+        return ws_cmd_result("ok", "PIR 알림 해제 — LED 복원 완료")
 
     async def _execute_query_bathroom_temp(self, data: dict) -> str:
         """
@@ -482,20 +585,6 @@ class CommandRouter:
             return ws_cmd_result("fail", f"온도 범위 초과: {value}°C (10~40°C)")
 
         # ESP32에 seg7 명령 전송 (실제 7세그먼트 있을 때 사용)
-        # client = self._tcp.get_device(DEVICE_HOME)
-        # if client:
-        #     payload = (_j.dumps({
-        #         "cmd": "seg7",
-        #         "pin_clk": 22,
-        #         "pin_dio": 23,
-        #         "mode": "number",
-        #         "value": value,
-        #         "room": "bathroom",
-        #     }) + "\n").encode()
-        #     await self._tcp.send_command(DEVICE_HOME, payload)
-        #     logger.info(f"[Router] 욕실 희망온도 ESP32 전송: {value}°C")
-
-
         client = self._tcp.get_device(DEVICE_HOME)
         if not client:
             logger.warning("[Router] DEVICE_HOME 연결 안됨")
@@ -613,6 +702,7 @@ class CommandRouter:
             "msg":          f"상태 조회 완료 ({len(status_data)}개 공간)",
             "tts_response": tts_out,
             "status_data":  status_data,
+            "pir_mode":     self._current_pir_mode,
         }, ensure_ascii=False)
 
     def _build_status_sentence(self, status_data: dict) -> str:
