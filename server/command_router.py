@@ -115,11 +115,13 @@ class CommandRouter:
         settings: dict,
         llm_engine=None,
         ws_hub=None,
+        db_logger=None,
     ):
         self._tcp = tcp_server
         self._settings = settings
         self._llm = llm_engine
         self._ws_hub = ws_hub   # WebSocketHub (connected_count 조회용)
+        self._db = db_logger    # DBLogger (SR-3.1 이벤트 로그)
 
         # 공간명 → device_id 키워드 매핑 (settings.yaml)
         self._keyword_map: dict[str, str] = (
@@ -248,6 +250,13 @@ class CommandRouter:
             # ── device_update 브로드캐스트 → 프론트 뱃지 즉시 반영 ─
             from protocol.schema import ws_device_update
             await self._tcp._broadcast(ws_device_update(device_id, client.state))
+
+            # DB 로그 (SR-3.1)
+            if self._db:
+                self._db.log("device_control", "command_router",
+                             f"{device_id} {cmd} 명령 전송{detail}",
+                             device_id=device_id, room=data.get("room"),
+                             detail=data)
 
             # tts_response 있으면 결과에 포함
             result_msg = f"{device_id} {cmd} 명령 전송{detail}"
@@ -402,6 +411,13 @@ class CommandRouter:
 
         logger.info(f"[Router] PIR 모드 설정: {pir_mode} (context={context})")
 
+        # DB 로그 (SR-3.1)
+        if self._db:
+            self._db.log("pir_mode", "command_router",
+                         f"PIR {pir_mode} 모드 설정 (context={context})",
+                         device_id="esp32_home",
+                         detail={"cmd": cmd, "pir_mode": pir_mode, "context": context})
+
         # away_mode: 전체 조명 OFF 추가 실행
         if cmd == "away_mode":
             import asyncio
@@ -508,6 +524,12 @@ class CommandRouter:
 
         msg = f"욕실 희망온도 {value}°C 설정 완료"
         logger.info(f"[Router] {msg}")
+
+        # DB 로그 (SR-3.1)
+        if self._db:
+            self._db.log("bathroom_temp", "command_router", msg,
+                         device_id="esp32_home", room="bathroom",
+                         detail={"action": "set", "value": value})
 
         if tts:
             return _j.dumps({
@@ -691,6 +713,13 @@ class CommandRouter:
 
         logger.info(f"[Router] 거실 음악 제어: {action_label}")
 
+        # DB 로그 (SR-3.1)
+        if self._db:
+            self._db.log("music_control", "command_router",
+                         f"거실 음악 {action_label}",
+                         room="living",
+                         detail={"action": action, "value": value})
+
         # tts_response 있으면 결과에 포함
         tts = data.get("tts_response")
         if tts:
@@ -794,6 +823,12 @@ class CommandRouter:
 
         if not data:
             return ws_cmd_result("unknown", f"명령을 이해하지 못했습니다: '{text}'")
+
+        # DB 로그: LLM 파싱 결과 (SR-3.1)
+        if self._db:
+            self._db.log("llm_parse", "command_router",
+                         f"LLM 파싱: '{text}' → cmd={data.get('cmd')}",
+                         detail={"input": text, "output": data})
 
         # ── v1.2: cmd=None 자유 대화 처리 ───────────────────────────
         # LLM이 IoT 명령 없이 tts_response만 반환한 경우

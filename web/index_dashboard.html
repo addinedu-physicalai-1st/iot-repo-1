@@ -743,6 +743,231 @@ header {
   .voice-text  { font-size:1.1rem; }
 }
 
+/* ── DB 로그 검색 모달 ── */
+.dblog-overlay {
+  display:none;
+  position:fixed; inset:0; z-index:90;
+  background:rgba(5,8,16,0.92);
+  backdrop-filter:blur(8px);
+  align-items:flex-start; justify-content:center;
+  padding-top:40px;
+}
+.dblog-overlay.show { display:flex; animation:fadeUp 0.25s ease; }
+.dblog-modal {
+  background:var(--bg1);
+  border:1px solid var(--border);
+  border-top:3px solid var(--cyan);
+  border-radius:12px;
+  width:92%; max-width:960px;
+  max-height:calc(100vh - 80px);
+  display:flex; flex-direction:column;
+  overflow:hidden;
+}
+.dblog-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 20px;
+  border-bottom:1px solid var(--border);
+}
+.dblog-title {
+  font-size:1.1rem; font-weight:700; letter-spacing:0.05em;
+  color:var(--cyan);
+}
+.dblog-close {
+  background:none; border:1px solid var(--border);
+  color:var(--text2); font-size:0.8rem;
+  padding:4px 12px; border-radius:4px;
+  cursor:pointer; transition:all 0.15s;
+}
+.dblog-close:hover { border-color:var(--red); color:var(--red); }
+
+/* 통계 바 */
+.dblog-stats {
+  display:flex; gap:12px; padding:12px 20px;
+  border-bottom:1px solid var(--border);
+  flex-wrap:wrap;
+}
+.dblog-stat-chip {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:6px; padding:6px 12px;
+  font-family:var(--font-mono); font-size:0.7rem;
+}
+.dblog-stat-chip .stat-label {
+  color:var(--text2); font-size:0.6rem; letter-spacing:0.08em;
+  display:block; margin-bottom:2px;
+}
+.dblog-stat-chip .stat-val { color:var(--cyan); font-weight:700; font-size:0.9rem; }
+
+/* 필터 바 */
+.dblog-filters {
+  display:flex; gap:8px; padding:12px 20px;
+  border-bottom:1px solid var(--border);
+  flex-wrap:wrap; align-items:flex-end;
+}
+.dblog-filter-group {
+  display:flex; flex-direction:column; gap:3px;
+}
+.dblog-filter-group label {
+  font-size:0.55rem; color:var(--text2);
+  letter-spacing:0.1em; text-transform:uppercase;
+}
+.dblog-filter-group select,
+.dblog-filter-group input {
+  background:var(--bg2); border:1px solid var(--border);
+  color:var(--text); font-family:var(--font-mono); font-size:0.7rem;
+  padding:6px 8px; border-radius:4px; outline:none;
+  min-width:100px;
+}
+.dblog-filter-group select option {
+  background:var(--bg2); color:var(--text);
+}
+.dblog-filter-group select:focus,
+.dblog-filter-group input:focus { border-color:var(--cyan); }
+
+/* date input 다크 테마 */
+.dblog-filter-group input[type="date"] {
+  color-scheme:dark;
+  min-width:130px;
+}
+.dblog-filter-group input[type="date"]::-webkit-calendar-picker-indicator {
+  filter:invert(0.7) sepia(1) saturate(3) hue-rotate(160deg);
+  cursor:pointer;
+}
+.dblog-search-btn {
+  background:var(--cyan); color:#000; border:none;
+  border-radius:4px; padding:6px 16px;
+  font-family:var(--font-main); font-weight:700; font-size:0.78rem;
+  cursor:pointer; transition:all 0.15s; height:32px;
+}
+.dblog-search-btn:hover { background:var(--cyan2); }
+
+/* 결과 테이블 */
+.dblog-results {
+  flex:1; overflow-y:auto; padding:0 20px 12px;
+}
+.dblog-results::-webkit-scrollbar { width:4px; }
+.dblog-results::-webkit-scrollbar-track { background:transparent; }
+.dblog-results::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+.dblog-table {
+  width:100%; border-collapse:collapse;
+  font-family:var(--font-mono); font-size:0.65rem;
+}
+.dblog-table thead { position:sticky; top:0; z-index:2; }
+.dblog-table th {
+  background:var(--bg2); color:var(--text2);
+  text-align:left; padding:8px 8px;
+  font-size:0.6rem; letter-spacing:0.08em;
+  text-transform:uppercase; border-bottom:1px solid var(--border);
+}
+.dblog-table td {
+  padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.03);
+  vertical-align:top; color:var(--text); line-height:1.4;
+}
+.dblog-table tr:hover td { background:rgba(0,200,255,0.03); }
+.dblog-table .td-time   { color:var(--text2); white-space:nowrap; width:140px; }
+.dblog-table .td-cat    { white-space:nowrap; }
+.dblog-table .td-level  { white-space:nowrap; width:50px; }
+.dblog-table .td-summary { max-width:320px; word-break:break-word; }
+
+.dblog-level-INFO { color:var(--cyan); }
+.dblog-level-WARN { color:var(--yellow); }
+.dblog-level-ERROR { color:var(--red); }
+
+.dblog-cat-badge {
+  display:inline-block; padding:2px 6px; border-radius:3px;
+  font-size:0.6rem; background:rgba(0,200,255,0.1); color:var(--cyan);
+}
+
+/* 페이지네이션 */
+.dblog-pagination {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 20px; border-top:1px solid var(--border);
+  font-family:var(--font-mono); font-size:0.65rem; color:var(--text2);
+}
+.dblog-page-btns { display:flex; gap:6px; }
+.dblog-page-btn {
+  background:var(--bg2); border:1px solid var(--border);
+  color:var(--text); font-size:0.65rem; padding:4px 10px;
+  border-radius:4px; cursor:pointer; transition:all 0.15s;
+}
+.dblog-page-btn:hover { border-color:var(--cyan); color:var(--cyan); }
+.dblog-page-btn:disabled { opacity:0.3; cursor:default; }
+
+/* 빈 상태 */
+.dblog-empty {
+  text-align:center; padding:40px; color:var(--text2);
+  font-size:0.8rem;
+}
+
+@media (max-width: 768px) {
+  .dblog-modal { width:98%; max-height:90vh; }
+  .dblog-filters { flex-direction:column; }
+  .dblog-filter-group { width:100%; }
+  .dblog-filter-group select,
+  .dblog-filter-group input { width:100%; }
+  .dblog-stats { gap:6px; }
+  .dblog-table { font-size:0.58rem; }
+}
+
+/* ── SR-3.3: 패턴 분석 탭 ── */
+.dblog-tabs {
+  display:flex; gap:0; border-bottom:1px solid var(--border);
+}
+.dblog-tab {
+  flex:1; padding:10px 16px; text-align:center;
+  font-family:var(--font-mono); font-size:0.72rem;
+  letter-spacing:0.08em; color:var(--text2);
+  background:transparent; border:none;
+  cursor:pointer; transition:all 0.2s;
+  border-bottom:2px solid transparent;
+}
+.dblog-tab:hover { color:var(--text); background:rgba(0,200,255,0.03); }
+.dblog-tab.active {
+  color:var(--cyan); border-bottom-color:var(--cyan);
+  background:rgba(0,200,255,0.05);
+}
+.dblog-tab-content { display:none; flex-direction:column; flex:1; overflow:hidden; }
+.dblog-tab-content.active { display:flex; }
+
+.pa-controls {
+  display:flex; gap:8px; padding:12px 20px;
+  border-bottom:1px solid var(--border);
+  flex-wrap:wrap; align-items:flex-end;
+}
+.pa-charts {
+  flex:1; overflow-y:auto; padding:16px 20px;
+  display:grid; grid-template-columns:1fr 1fr;
+  gap:16px; align-content:start;
+}
+.pa-chart-box {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:8px; padding:14px;
+}
+.pa-chart-box.full-width { grid-column:1 / -1; }
+.pa-chart-title {
+  font-family:var(--font-mono); font-size:0.62rem;
+  color:var(--text2); letter-spacing:0.1em;
+  text-transform:uppercase; margin-bottom:10px;
+}
+.pa-chart-wrap { position:relative; height:200px; }
+.pa-chart-wrap.tall { height:260px; }
+
+.pa-anomaly-list { max-height:200px; overflow-y:auto; }
+.pa-anomaly-item {
+  display:flex; gap:10px; align-items:center;
+  padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.03);
+  font-family:var(--font-mono); font-size:0.62rem;
+}
+.pa-anomaly-badge {
+  padding:2px 6px; border-radius:3px; font-size:0.58rem; font-weight:700;
+}
+.pa-anomaly-badge.spike { background:rgba(255,64,96,0.15); color:var(--red); }
+.pa-anomaly-badge.drop  { background:rgba(255,180,0,0.15); color:var(--yellow); }
+
+@media (max-width: 768px) {
+  .pa-charts { grid-template-columns:1fr; }
+}
+
 /* ── CCTV 모달 ── */
 .cctv-modal-overlay {
   display:none;
@@ -1069,6 +1294,11 @@ header {
   </div><!-- /devices-section -->
   <div class="side-panel">
 
+    <!-- DB 로그 검색 버튼 -->
+    <button class="dblog-search-btn" style="width:100%;padding:10px;font-size:0.82rem;border-radius:8px;" onclick="openDbLog()">
+      DB EVENT LOG
+    </button>
+
     <!-- HOUSE MAP -->
     <div class="section-label">HOUSE MAP</div>
     <div class="chart-panel" style="padding:10px;">
@@ -1086,6 +1316,200 @@ header {
 
   </div>
 
+</div>
+
+<!-- DB 이벤트 로그 검색 모달 -->
+<div class="dblog-overlay" id="dblogOverlay">
+  <div class="dblog-modal">
+    <div class="dblog-header">
+      <div class="dblog-title">EVENT LOG DATABASE</div>
+      <button class="dblog-close" onclick="closeDbLog()">ESC 닫기</button>
+    </div>
+
+    <!-- 탭 바 -->
+    <div class="dblog-tabs">
+      <button class="dblog-tab active" onclick="switchDbTab('search')">LOG SEARCH</button>
+      <button class="dblog-tab" onclick="switchDbTab('pattern')">PATTERN ANALYSIS</button>
+    </div>
+
+    <!-- ═══ 탭1: 로그 검색 ═══ -->
+    <div class="dblog-tab-content active" id="dbTabSearch">
+
+      <!-- 통계 -->
+      <div class="dblog-stats" id="dblogStats">
+        <div class="dblog-stat-chip">
+          <span class="stat-label">TOTAL</span>
+          <span class="stat-val" id="dbstat-total">-</span>
+        </div>
+        <div class="dblog-stat-chip">
+          <span class="stat-label">24H</span>
+          <span class="stat-val" id="dbstat-24h">-</span>
+        </div>
+        <div class="dblog-stat-chip">
+          <span class="stat-label">CATEGORIES</span>
+          <span class="stat-val" id="dbstat-cats">-</span>
+        </div>
+      </div>
+
+      <!-- 필터 -->
+      <div class="dblog-filters">
+        <div class="dblog-filter-group">
+          <label>카테고리</label>
+          <select id="dbf-category" onchange="searchDbLogs()">
+            <option value="">전체</option>
+          </select>
+        </div>
+        <div class="dblog-filter-group">
+          <label>레벨</label>
+          <select id="dbf-level" onchange="searchDbLogs()">
+            <option value="">전체</option>
+            <option value="INFO">INFO</option>
+            <option value="WARN">WARN</option>
+            <option value="ERROR">ERROR</option>
+          </select>
+        </div>
+        <div class="dblog-filter-group">
+          <label>디바이스</label>
+          <select id="dbf-device" onchange="searchDbLogs()">
+            <option value="">전체</option>
+            <option value="esp32_garage">차고</option>
+            <option value="esp32_bathroom">욕실</option>
+            <option value="esp32_bedroom">침실</option>
+            <option value="esp32_entrance">현관</option>
+          </select>
+        </div>
+        <div class="dblog-filter-group">
+          <label>시작일</label>
+          <input type="date" id="dbf-from" onchange="searchDbLogs()">
+        </div>
+        <div class="dblog-filter-group">
+          <label>종료일</label>
+          <input type="date" id="dbf-to" onchange="searchDbLogs()">
+        </div>
+        <div class="dblog-filter-group">
+          <label>키워드</label>
+          <input type="text" id="dbf-keyword" placeholder="검색어..." style="min-width:120px;"
+                 oninput="dbfKeywordDebounce()">
+        </div>
+        <button class="dblog-search-btn" onclick="resetDbFilters()">초기화</button>
+      </div>
+
+      <!-- 결과 테이블 -->
+      <div class="dblog-results" id="dblogResults">
+        <table class="dblog-table">
+          <thead>
+            <tr>
+              <th>시간</th>
+              <th>카테고리</th>
+              <th>레벨</th>
+              <th>내용</th>
+              <th>디바이스</th>
+            </tr>
+          </thead>
+          <tbody id="dblogBody">
+            <tr><td colspan="5" class="dblog-empty">DB EVENT LOG 버튼을 눌러 로그를 조회하세요.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 페이지네이션 -->
+      <div class="dblog-pagination">
+        <span id="dblog-page-info">-</span>
+        <div class="dblog-page-btns">
+          <button class="dblog-page-btn" id="dblog-prev" onclick="dblogPage(-1)" disabled>&#9664; 이전</button>
+          <button class="dblog-page-btn" id="dblog-next" onclick="dblogPage(1)" disabled>다음 &#9654;</button>
+        </div>
+      </div>
+
+    </div><!-- /dbTabSearch -->
+
+    <!-- ═══ 탭2: 패턴 분석 ═══ -->
+    <div class="dblog-tab-content" id="dbTabPattern">
+
+      <!-- 필터 컨트롤 -->
+      <div class="pa-controls">
+        <div class="dblog-filter-group">
+          <label>기간</label>
+          <select id="pa-range" onchange="paUpdateDateRange()">
+            <option value="7d">최근 7일</option>
+            <option value="30d" selected>최근 30일</option>
+            <option value="90d">최근 90일</option>
+            <option value="custom">직접 입력</option>
+          </select>
+        </div>
+        <div class="dblog-filter-group">
+          <label>시작일</label>
+          <input type="date" id="pa-from">
+        </div>
+        <div class="dblog-filter-group">
+          <label>종료일</label>
+          <input type="date" id="pa-to">
+        </div>
+        <div class="dblog-filter-group">
+          <label>카테고리</label>
+          <select id="pa-category">
+            <option value="">전체</option>
+          </select>
+        </div>
+        <div class="dblog-filter-group">
+          <label>디바이스</label>
+          <select id="pa-device">
+            <option value="">전체</option>
+            <option value="esp32_garage">차고</option>
+            <option value="esp32_bathroom">욕실</option>
+            <option value="esp32_bedroom">침실</option>
+            <option value="esp32_entrance">현관</option>
+          </select>
+        </div>
+        <button class="dblog-search-btn" onclick="loadPatternAnalysis()">분석</button>
+      </div>
+
+      <!-- 차트 그리드 -->
+      <div class="pa-charts" id="paCharts">
+
+        <!-- 일별 타임라인 (full-width) -->
+        <div class="pa-chart-box full-width">
+          <div class="pa-chart-title">DAILY TIMELINE</div>
+          <div class="pa-chart-wrap tall"><canvas id="paChartDaily"></canvas></div>
+        </div>
+
+        <!-- 시간대별 분포 -->
+        <div class="pa-chart-box">
+          <div class="pa-chart-title">HOURLY DISTRIBUTION</div>
+          <div class="pa-chart-wrap"><canvas id="paChartHourly"></canvas></div>
+        </div>
+
+        <!-- 카테고리 분포 -->
+        <div class="pa-chart-box">
+          <div class="pa-chart-title">CATEGORY BREAKDOWN</div>
+          <div class="pa-chart-wrap"><canvas id="paChartCategory"></canvas></div>
+        </div>
+
+        <!-- 평일 vs 주말 -->
+        <div class="pa-chart-box">
+          <div class="pa-chart-title">WEEKDAY vs WEEKEND</div>
+          <div class="pa-chart-wrap"><canvas id="paChartDayType"></canvas></div>
+        </div>
+
+        <!-- 디바이스별 활동 -->
+        <div class="pa-chart-box">
+          <div class="pa-chart-title">DEVICE ACTIVITY</div>
+          <div class="pa-chart-wrap"><canvas id="paChartDevice"></canvas></div>
+        </div>
+
+        <!-- 이상 패턴 (full-width) -->
+        <div class="pa-chart-box full-width">
+          <div class="pa-chart-title">ANOMALY DETECTION</div>
+          <div class="pa-anomaly-list" id="paAnomalyList">
+            <div class="dblog-empty">분석 버튼을 눌러 이상 패턴을 탐지하세요.</div>
+          </div>
+        </div>
+
+      </div>
+
+    </div><!-- /dbTabPattern -->
+
+  </div>
 </div>
 
 <!-- CCTV 보안 모달 -->
@@ -2348,6 +2772,363 @@ function _execMusicAction(action, value) {
       }
       break;
   }
+}
+
+// ════════════════════════════════════════════
+// DB 이벤트 로그 검색 (SR-3.2)
+// ════════════════════════════════════════════
+let dblogOffset = 0;
+const DBLOG_LIMIT = 50;
+let dblogTotal = 0;
+
+function openDbLog() {
+  document.getElementById('dblogOverlay').classList.add('show');
+  loadDbStats();
+  loadDbCategories();
+  searchDbLogs();
+}
+
+function closeDbLog() {
+  document.getElementById('dblogOverlay').classList.remove('show');
+}
+
+// ESC 키로 닫기
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDbLog();
+});
+
+async function loadDbStats() {
+  try {
+    const res = await fetch('/logs/stats');
+    const data = await res.json();
+    document.getElementById('dbstat-total').textContent = (data.total ?? 0).toLocaleString();
+    document.getElementById('dbstat-24h').textContent = (data.last_24h ?? 0).toLocaleString();
+    const catCount = data.by_category ? Object.keys(data.by_category).length : 0;
+    document.getElementById('dbstat-cats').textContent = catCount;
+  } catch (e) {
+    console.warn('DB stats 로드 실패:', e);
+  }
+}
+
+async function loadDbCategories() {
+  try {
+    const res = await fetch('/logs/categories');
+    const data = await res.json();
+    const sel = document.getElementById('dbf-category');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">전체</option>';
+    (data.categories || []).forEach(cat => {
+      const opt = document.createElement('option');
+      opt.value = cat; opt.textContent = cat;
+      sel.appendChild(opt);
+    });
+    sel.value = current;
+  } catch (e) {
+    console.warn('DB categories 로드 실패:', e);
+  }
+}
+
+async function searchDbLogs(resetPage = true) {
+  if (resetPage) dblogOffset = 0;
+
+  const params = new URLSearchParams();
+  const category = document.getElementById('dbf-category').value;
+  const level    = document.getElementById('dbf-level').value;
+  const device   = document.getElementById('dbf-device').value;
+  const from     = document.getElementById('dbf-from').value;
+  const to       = document.getElementById('dbf-to').value;
+  const keyword  = document.getElementById('dbf-keyword').value.trim();
+
+  if (category) params.set('category', category);
+  if (level)    params.set('level', level);
+  if (device)   params.set('device_id', device);
+  if (from)     params.set('date_from', from);
+  if (to)       params.set('date_to', to);
+  if (keyword)  params.set('keyword', keyword);
+  params.set('limit', DBLOG_LIMIT);
+  params.set('offset', dblogOffset);
+
+  try {
+    const res = await fetch(`/logs/search?${params}`);
+    const data = await res.json();
+    dblogTotal = data.total || 0;
+    renderDbLogs(data.items || []);
+    updateDbPagination();
+  } catch (e) {
+    console.warn('DB search 실패:', e);
+    document.getElementById('dblogBody').innerHTML =
+      '<tr><td colspan="5" class="dblog-empty">검색 실패 — 서버 연결을 확인하세요</td></tr>';
+  }
+}
+
+function renderDbLogs(items) {
+  const tbody = document.getElementById('dblogBody');
+  if (!items.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="dblog-empty">검색 결과가 없습니다.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = items.map(item => {
+    const time = item.created_at ? item.created_at.replace('T', ' ').slice(0, 19) : '-';
+    const cat  = item.event_category || '-';
+    const lvl  = item.level || 'INFO';
+    const summary = escapeHtml(item.summary || '-');
+    const dev  = item.device_id || '-';
+    return `<tr>
+      <td class="td-time">${time}</td>
+      <td class="td-cat"><span class="dblog-cat-badge">${cat}</span></td>
+      <td class="td-level"><span class="dblog-level-${lvl}">${lvl}</span></td>
+      <td class="td-summary">${summary}</td>
+      <td>${dev}</td>
+    </tr>`;
+  }).join('');
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+function updateDbPagination() {
+  const page = Math.floor(dblogOffset / DBLOG_LIMIT) + 1;
+  const totalPages = Math.max(1, Math.ceil(dblogTotal / DBLOG_LIMIT));
+  document.getElementById('dblog-page-info').textContent =
+    `${dblogTotal.toLocaleString()}건 | ${page} / ${totalPages} 페이지`;
+  document.getElementById('dblog-prev').disabled = (dblogOffset <= 0);
+  document.getElementById('dblog-next').disabled = (dblogOffset + DBLOG_LIMIT >= dblogTotal);
+}
+
+function dblogPage(dir) {
+  dblogOffset += dir * DBLOG_LIMIT;
+  if (dblogOffset < 0) dblogOffset = 0;
+  searchDbLogs(false);
+}
+
+let _dbfKeyTimer = null;
+function dbfKeywordDebounce() {
+  clearTimeout(_dbfKeyTimer);
+  _dbfKeyTimer = setTimeout(() => searchDbLogs(), 300);
+}
+
+function resetDbFilters() {
+  document.getElementById('dbf-category').value = '';
+  document.getElementById('dbf-level').value = '';
+  document.getElementById('dbf-device').value = '';
+  document.getElementById('dbf-from').value = '';
+  document.getElementById('dbf-to').value = '';
+  document.getElementById('dbf-keyword').value = '';
+  searchDbLogs();
+}
+
+// ════════════════════════════════════════════
+// SR-3.3: 패턴 분석
+// ════════════════════════════════════════════
+let paLoaded = false;
+const paChartInstances = {};
+
+function switchDbTab(tab) {
+  document.querySelectorAll('.dblog-tab').forEach((t, i) => {
+    t.classList.toggle('active', (tab === 'search' ? i === 0 : i === 1));
+  });
+  document.getElementById('dbTabSearch').classList.toggle('active', tab === 'search');
+  document.getElementById('dbTabPattern').classList.toggle('active', tab === 'pattern');
+
+  if (tab === 'pattern' && !paLoaded) {
+    paUpdateDateRange();
+    // 패턴 탭 카테고리 목록 동기화
+    loadPaCategories();
+    loadPatternAnalysis();
+    paLoaded = true;
+  }
+}
+
+async function loadPaCategories() {
+  try {
+    const res = await fetch('/logs/categories');
+    const data = await res.json();
+    const sel = document.getElementById('pa-category');
+    sel.innerHTML = '<option value="">전체</option>';
+    (data.categories || []).forEach(cat => {
+      const opt = document.createElement('option');
+      opt.value = cat; opt.textContent = cat;
+      sel.appendChild(opt);
+    });
+  } catch (e) { console.warn('PA categories 로드 실패:', e); }
+}
+
+function paUpdateDateRange() {
+  const range = document.getElementById('pa-range').value;
+  const toEl = document.getElementById('pa-to');
+  const fromEl = document.getElementById('pa-from');
+  const today = new Date();
+  toEl.value = today.toISOString().slice(0, 10);
+
+  if (range === 'custom') return;
+  const days = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+  const from = new Date(today);
+  from.setDate(from.getDate() - days);
+  fromEl.value = from.toISOString().slice(0, 10);
+}
+
+async function loadPatternAnalysis() {
+  const dateFrom = document.getElementById('pa-from').value;
+  const dateTo   = document.getElementById('pa-to').value;
+  const category = document.getElementById('pa-category').value;
+  const deviceId = document.getElementById('pa-device').value;
+
+  const q = (extra = {}) => {
+    const p = new URLSearchParams();
+    if (dateFrom) p.set('date_from', dateFrom);
+    if (dateTo)   p.set('date_to', dateTo);
+    if (category) p.set('category', category);
+    if (deviceId) p.set('device_id', deviceId);
+    Object.entries(extra).forEach(([k, v]) => p.set(k, v));
+    return p.toString();
+  };
+
+  try {
+    const [daily, hourlyAll, hourlyWd, hourlyWe, cats, devs, anomalies] = await Promise.all([
+      fetch(`/logs/pattern/daily?${q()}`).then(r => r.json()),
+      fetch(`/logs/pattern/hourly?${q()}`).then(r => r.json()),
+      fetch(`/logs/pattern/hourly?${q({day_type:'weekday'})}`).then(r => r.json()),
+      fetch(`/logs/pattern/hourly?${q({day_type:'weekend'})}`).then(r => r.json()),
+      fetch(`/logs/pattern/categories?${q()}`).then(r => r.json()),
+      fetch(`/logs/pattern/devices?${q()}`).then(r => r.json()),
+      fetch(`/logs/pattern/anomalies?${q()}`).then(r => r.json()),
+    ]);
+
+    // 1) 일별 타임라인 (Line)
+    paRenderChart('paChartDaily', 'line', {
+      labels: (daily.items || []).map(i => i.date),
+      datasets: [{
+        label: '이벤트 수',
+        data: (daily.items || []).map(i => i.count),
+        borderColor: '#00C8FF',
+        backgroundColor: 'rgba(0,200,255,0.08)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 2,
+      }]
+    }, { plugins: { legend: { display: false } } });
+
+    // 2) 시간대별 분포 (Bar 24h)
+    const hours = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}시`);
+    const hourlyMap = {};
+    (hourlyAll.items || []).forEach(i => hourlyMap[i.hour] = i.count);
+    paRenderChart('paChartHourly', 'bar', {
+      labels: hours,
+      datasets: [{
+        label: '이벤트 수',
+        data: hours.map((_,i) => hourlyMap[i] || 0),
+        backgroundColor: 'rgba(0,200,255,0.5)',
+        borderColor: '#00C8FF',
+        borderWidth: 1,
+      }]
+    }, { plugins: { legend: { display: false } } });
+
+    // 3) 카테고리 분포 (Doughnut)
+    const catColors = ['#00C8FF','#00FF88','#FFB400','#FF4060','#A060FF','#FF8C00','#00CED1','#FF69B4'];
+    paRenderChart('paChartCategory', 'doughnut', {
+      labels: (cats.items || []).map(i => i.category),
+      datasets: [{
+        data: (cats.items || []).map(i => i.count),
+        backgroundColor: (cats.items || []).map((_,i) => catColors[i % catColors.length]),
+        borderWidth: 0,
+      }]
+    }, {
+      plugins: {
+        legend: { position: 'right', labels: { color: '#C8E0F0', font: { size: 10, family: 'JetBrains Mono' }, boxWidth: 10 } }
+      }
+    });
+
+    // 4) 평일 vs 주말 (Grouped Bar)
+    const wdMap = {}, weMap = {};
+    (hourlyWd.items || []).forEach(i => wdMap[i.hour] = i.count);
+    (hourlyWe.items || []).forEach(i => weMap[i.hour] = i.count);
+    paRenderChart('paChartDayType', 'bar', {
+      labels: hours,
+      datasets: [
+        { label: '평일', data: hours.map((_,i) => wdMap[i] || 0), backgroundColor: 'rgba(0,200,255,0.5)', borderColor: '#00C8FF', borderWidth: 1 },
+        { label: '주말', data: hours.map((_,i) => weMap[i] || 0), backgroundColor: 'rgba(0,255,136,0.5)', borderColor: '#00FF88', borderWidth: 1 },
+      ]
+    }, {
+      plugins: { legend: { labels: { color: '#C8E0F0', font: { size: 10, family: 'JetBrains Mono' } } } }
+    });
+
+    // 5) 디바이스별 활동 (Horizontal Bar)
+    const devItems = devs.items || [];
+    paRenderChart('paChartDevice', 'bar', {
+      labels: devItems.map(i => i.room ? `${i.device_id} (${i.room})` : i.device_id),
+      datasets: [{
+        label: '이벤트 수',
+        data: devItems.map(i => i.count),
+        backgroundColor: 'rgba(160,96,255,0.5)',
+        borderColor: '#A060FF',
+        borderWidth: 1,
+      }]
+    }, {
+      indexAxis: 'y',
+      plugins: { legend: { display: false } }
+    });
+
+    // 6) 이상 패턴 목록
+    renderAnomalies(anomalies.anomalies || []);
+
+  } catch (e) {
+    console.warn('패턴 분석 로드 실패:', e);
+  }
+}
+
+function paRenderChart(canvasId, type, data, extraOpts = {}) {
+  if (paChartInstances[canvasId]) {
+    paChartInstances[canvasId].destroy();
+  }
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const baseOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {},
+    plugins: { legend: { labels: { color: '#C8E0F0' } } },
+  };
+  // axis 색상 (doughnut 제외)
+  if (type !== 'doughnut') {
+    const axisConf = { ticks: { color: '#5A7090', font: { size: 9, family: 'JetBrains Mono' } }, grid: { color: 'rgba(0,200,255,0.06)' } };
+    baseOpts.scales.x = { ...axisConf };
+    baseOpts.scales.y = { ...axisConf, beginAtZero: true };
+  }
+  const opts = mergeDeep(baseOpts, extraOpts);
+  paChartInstances[canvasId] = new Chart(ctx, { type, data, options: opts });
+}
+
+function mergeDeep(target, source) {
+  const out = { ...target };
+  for (const key of Object.keys(source)) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+      out[key] = mergeDeep(out[key] || {}, source[key]);
+    } else {
+      out[key] = source[key];
+    }
+  }
+  return out;
+}
+
+function renderAnomalies(items) {
+  const container = document.getElementById('paAnomalyList');
+  if (!items.length) {
+    container.innerHTML = '<div class="dblog-empty">탐지된 이상 패턴이 없습니다.</div>';
+    return;
+  }
+  container.innerHTML = items.map(a => {
+    const badge = a.type === 'spike'
+      ? '<span class="pa-anomaly-badge spike">SPIKE</span>'
+      : '<span class="pa-anomaly-badge drop">DROP</span>';
+    const ratio = a.ratio ? `(${a.ratio.toFixed(1)}x)` : '';
+    return `<div class="pa-anomaly-item">
+      ${badge}
+      <span style="color:var(--text)">${a.date} ${String(a.hour).padStart(2,'0')}:00</span>
+      <span style="color:var(--text2)">${a.count}건 / 평균 ${a.avg.toFixed(1)}건 ${ratio}</span>
+    </div>`;
+  }).join('');
 }
 
 // ════════════════════════════════════════════

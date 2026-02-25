@@ -69,6 +69,7 @@ from server.command_router import CommandRouter
 from server.llm_engine     import LLMEngine
 from server.stt_engine     import STTEngine
 from server.tts_engine     import TTSEngine
+from server.db_logger      import DBLogger
 from server.api_routes     import create_router
 
 # ─────────────────────────────────────────────
@@ -110,6 +111,7 @@ def create_app() -> FastAPI:
     disable_stt = os.getenv("DISABLE_STT", "0") == "1"
     disable_llm = os.getenv("DISABLE_LLM", "0") == "1"
     disable_tts = os.getenv("DISABLE_TTS", "0") == "1"
+    disable_db  = os.getenv("DISABLE_DB",  "0") == "1"
 
     # ════════════════════════════════════════════
     # 1. 핵심 인스턴스 생성
@@ -174,11 +176,20 @@ def create_app() -> FastAPI:
     else:
         logger.warning("TTS 비활성화 (DISABLE_TTS=1)")
 
-    # ── 명령 라우터 (LLM 주입) ───────────────────────────────────────
+    # ── DB 로거 (SR-3.1 / SR-3.2) ────────────────────────────────────
+    db_logger: DBLogger | None = None
+    if not disable_db and cfg.get("database", {}).get("enabled", False):
+        db_logger = DBLogger(cfg["database"])
+        logger.info(f"DBLogger 생성: {cfg['database']['host']}:{cfg['database']['port']}/{cfg['database']['db']}")
+    else:
+        logger.warning("DB 비활성화 → 이벤트 로그 저장 안 함")
+
+    # ── 명령 라우터 (LLM + DB 주입) ──────────────────────────────────
     command_router = CommandRouter(
         tcp_server=tcp_server,
         settings=cfg,
         llm_engine=llm_engine,
+        db_logger=db_logger,
     )
 
     # ── STT 엔진 ────────────────────────────────────────────────────
@@ -186,7 +197,7 @@ def create_app() -> FastAPI:
     if not disable_stt:
         _stt = cfg.get("stt", {})
         stt_engine = STTEngine(
-            on_result              = _make_stt_callback(command_router, ws_hub, tts_engine),
+            on_result              = _make_stt_callback(command_router, ws_hub, tts_engine, db_logger),
             on_wake                = _make_wake_callback(ws_hub),
             on_timeout             = _make_timeout_callback(ws_hub),
             model_size             = _stt.get("model_size", "base"),
@@ -216,7 +227,9 @@ def create_app() -> FastAPI:
     # ════════════════════════════════════════════
 
     tcp_server.ws_broadcast = ws_hub.broadcast
+    tcp_server.db_logger = db_logger
     ws_hub._on_message = command_router.handle
+    ws_hub.db_logger = db_logger
 
     # ════════════════════════════════════════════
     # 3. lifespan
@@ -224,10 +237,19 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        _print_banner(cfg, stt_engine, llm_engine, tts_engine)
+        _print_banner(cfg, stt_engine, llm_engine, tts_engine, db_logger)
 
         # TCP 서버 시작
         await tcp_server.start()
+
+        # DB 초기화 (SR-3.1)
+        if db_logger:
+            db_ok = await db_logger.initialize()
+            if db_ok:
+                db_logger.log("server_event", "main", "서버 시작",
+                              detail={"action": "startup", "version": "0.7"})
+            else:
+                logger.warning("[DB] 초기화 실패 — 이벤트 로그 비활성화")
 
         # LLM 연결 확인 + 워밍업
         if llm_engine:
@@ -269,6 +291,11 @@ def create_app() -> FastAPI:
         # ── 종료 처리 ───────────────────────────────────────────────
         logger.info("종료 신호 수신 - 정리 중...")
 
+        if db_logger and db_logger.enabled:
+            db_logger.log("server_event", "main", "서버 종료",
+                          detail={"action": "shutdown"})
+            await asyncio.sleep(0.3)  # fire-and-forget INSERT 완료 대기
+
         if stt_engine:
             await stt_engine.stop()
         if stt_task:
@@ -280,6 +307,10 @@ def create_app() -> FastAPI:
             await llm_engine.close()
 
         await tcp_server.stop()
+
+        if db_logger:
+            await db_logger.close()
+
         logger.info("Voice IoT Controller 종료 완료")
 
     # ════════════════════════════════════════════
@@ -303,6 +334,7 @@ def create_app() -> FastAPI:
         tcp_server=tcp_server,
         ws_hub=ws_hub,
         command_router=command_router,
+        db_logger=db_logger,
     )
     app.include_router(api_router)
 
@@ -335,6 +367,12 @@ def create_app() -> FastAPI:
 
         logger.warning(f"[PIR] {alert_msg} | detail={detail}")
 
+        # DB 로그 (SR-3.1)
+        if db_logger and db_logger.enabled:
+            db_logger.log("security_alert", "main", alert_msg,
+                          device_id="http_client", level="WARN",
+                          detail={"event": event, "context": context, "detail": detail})
+
         # WS 브로드캐스트 → 프론트엔드 알림
         await ws_hub.broadcast(
             f'{{"type":"pir_alert","msg":"{alert_msg}","event":"{event}","context":"{context}"}}'
@@ -359,6 +397,7 @@ def create_app() -> FastAPI:
     app.state.llm_engine     = llm_engine
     app.state.stt_engine     = stt_engine
     app.state.tts_engine     = tts_engine
+    app.state.db_logger      = db_logger
     app.state.settings       = cfg
 
     return app
@@ -372,6 +411,7 @@ def _make_stt_callback(
     command_router: CommandRouter,
     ws_hub: WebSocketHub,
     tts_engine: TTSEngine | None,
+    db_logger: DBLogger | None = None,
 ):
     """
     STTEngine.on_result 콜백 생성
@@ -381,6 +421,11 @@ def _make_stt_callback(
     async def on_stt_result(text: str):
         import time
         logger.info(f"[Pipeline] STT → '{text}'")
+
+        # DB 로그: 음성 인식 결과 (SR-3.1)
+        if db_logger and db_logger.enabled:
+            db_logger.log("voice_input", "stt_engine", f"STT 인식: '{text}'",
+                          detail={"text": text, "source": "stt_engine"})
 
         # WS 브로드캐스트: 인식된 텍스트 전달
         await ws_hub.broadcast(
@@ -491,12 +536,13 @@ async def _start_stt(stt_engine: STTEngine):
 # 시작 배너
 # ─────────────────────────────────────────────
 
-def _print_banner(cfg: dict, stt_engine, llm_engine, tts_engine):
+def _print_banner(cfg: dict, stt_engine, llm_engine, tts_engine, db_logger=None):
     _stt = cfg.get("stt", {})
     _tts = cfg.get("tts", {})
+    _db  = cfg.get("database", {})
     w = 52
     logger.info("=" * w)
-    logger.info(" Voice IoT Controller  v0.6")
+    logger.info(" Voice IoT Controller  v0.7")
     logger.info("=" * w)
     logger.info(f"  TCP  : {cfg['server']['host']}:{cfg['server']['tcp_port']}")
     logger.info(f"  HTTP : 0.0.0.0:{cfg['server']['ws_port']}")
@@ -511,6 +557,7 @@ def _print_banner(cfg: dict, stt_engine, llm_engine, tts_engine):
     _provider = _tts.get("provider", "edge") if tts_engine else None
     _voice    = _tts.get(_provider, {}).get("voice", "") if _provider else ""
     logger.info(f"  TTS  : {'✅ ' + _provider + ' / ' + _voice if tts_engine else '⛔ 비활성화'}")
+    logger.info(f"  DB   : {'✅ MySQL ' + _db.get('host','') + '/' + _db.get('db','') if db_logger else '⛔ 비활성화'}")
     logger.info("=" * w)
 
 

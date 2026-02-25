@@ -29,7 +29,7 @@ server:
 
 ollama:
   host: "http://localhost:11434"
-  model: "exaone3.5:latest"
+  model: "exaone3.5:7.8b"
   timeout: 30
 
 # ================================================================
@@ -170,3 +170,16 @@ seg7_mode_keywords:
   온도:  "temp"
   습도:  "humidity"
   끄기:  "off"
+
+# ================================================================
+# Database 설정 (SR-3.1: 장기 로그 관리 / SR-3.2: 검색/조회)
+# ================================================================
+database:
+  enabled: true             # false 시 DB 로깅 비활성화 (기존 동작 유지)
+  host: "localhost"
+  port: 3306
+  user: "your_db_user"
+  password: "your_db_password"
+  db: "iot_smart_home"
+  pool_size: 5              # aiomysql 커넥션 풀 크기
+  pool_recycle: 3600        # 커넥션 재활용 주기 (초)

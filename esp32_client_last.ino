@@ -11,16 +11,14 @@
  *
  * 공간별 핀 배정:
  *   거실  (living)   : LED GPIO 2
- *   욕실  (bathroom) : LED GPIO 4  / TM1637 CLK GPIO 22 / DIO GPIO 23
+ *   욕실  (bathroom) : LED GPIO 4
  *   침실  (bedroom)  : LED GPIO 5  / Servo GPIO 14
- *   차고  (garage)   : LED GPIO 12 / Servo GPIO 156
+ *   차고  (garage)   : LED GPIO 12 / Servo GPIO 15
  *   현관  (entrance) : LED GPIO 13 / Servo GPIO 16
  *
  * 의존 라이브러리 (Arduino Library Manager):
  *   - ArduinoJson     (6.x)
  *   - ESP32Servo
- * 
- * 7세그먼트: 직접 핀 제어 (TM1637Display 라이브러리 미사용)
  *
  * 작성일: 2026-02-20
  * 수정일: 2026-02-22  단일 ESP32 통합 버전 (5개 공간 통합)
@@ -35,6 +33,7 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
+
 
 
 // ================================================================
@@ -52,7 +51,7 @@
 
 // ── 디바이스 ID ───────────────────────────────────────────────────
 #define DEVICE_ID      "esp32_home"
-#define CAPS_STR       "[\"led\",\"servo\",\"seg7\"]"
+#define CAPS_STR       "[\"led\",\"servo\"]"
 
 // ── 타이밍 ────────────────────────────────────────────────────────
 #define RECONNECT_DELAY_MS  3000
@@ -63,63 +62,19 @@
 // ================================================================
 
 // ── LED (공간별) ──────────────────────────────────────────────────
-#define PIN_LED_LIVING    2 // *
-//#define PIN_LED_BATHROOM  4
-//#define PIN_LED_BEDROOM   5
-//#define PIN_LED_GARAGE    12
-//#define PIN_LED_ENTRANCE  13
+#define PIN_LED_LIVING    2
+#define PIN_LED_BATHROOM  4
+#define PIN_LED_BEDROOM   5
+#define PIN_LED_GARAGE    12
+#define PIN_LED_ENTRANCE  13
 
 // ── 서보 (공간별) ─────────────────────────────────────────────────
-//#define PIN_SERVO_BEDROOM   14   // 커튼 
-#define PIN_SERVO_GARAGE    15   // 차고문  // *
-//#define PIN_SERVO_ENTRANCE  16   // 현관문
-
-// ── 4-Digit 7세그먼트 (욕실) - 직접 핀 제어 ──────────────────────────
-// ⚠️ 주의: PIN_A=4는 PIN_LED_BATHROOM=4와 겹칩니다. 필요시 핀 번호 변경하세요.
-// 세그먼트 핀 (A-G)
-const int PIN_A = 4;   // ⚠️ PIN_LED_BATHROOM과 충돌 가능
-const int PIN_B = 5;   // ⚠️ PIN_LED_BEDROOM과 충돌 가능
-const int PIN_C = 18;
-const int PIN_D = 19;
-const int PIN_E = 21;
-const int PIN_F = 22;
-const int PIN_G = 23;
-
-// 디지트 선택 핀 (공통 캐소드: LOW=선택, HIGH=OFF)
-const int SEG1 = 13;  // 첫 번째 자리 (왼쪽)
-const int SEG2 = 12;  // 두 번째 자리
-const int SEG3 = 14;  // 세 번째 자리
-const int SEG4 = 26;  // 네 번째 자리 (오른쪽)
-
-// 세그먼트 핀 배열 (A, B, C, D, E, F, G)
-const int segPins[7] = {PIN_A, PIN_B, PIN_C, PIN_D, PIN_E, PIN_F, PIN_G};
-// 디지트 핀 배열
-const int digitPins[4] = {SEG1, SEG2, SEG3, SEG4};
-
-// 0-9 숫자 패턴 (HIGH=켜짐, LOW=꺼짐) - 공통 캐소드
-// A, B, C, D, E, F, G 순서
-const byte digitPatterns[10][7] = {
-  {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, LOW },  // 0
-  {LOW,  HIGH, HIGH, LOW,  LOW,  LOW,  LOW },  // 1
-  {HIGH, HIGH, LOW,  HIGH, HIGH, LOW,  HIGH},  // 2
-  {HIGH, HIGH, HIGH, HIGH, LOW,  LOW,  HIGH},  // 3
-  {LOW,  HIGH, HIGH, LOW,  LOW,  HIGH, HIGH},  // 4
-  {HIGH, LOW,  HIGH, HIGH, LOW,  HIGH, HIGH},  // 5
-  {HIGH, LOW,  HIGH, HIGH, HIGH, HIGH, HIGH},  // 6
-  {HIGH, HIGH, HIGH, LOW,  LOW,  LOW,  LOW },  // 7
-  {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH},  // 8
-  {HIGH, HIGH, HIGH, HIGH, LOW,  HIGH, HIGH}   // 9
-};
-
-// 현재 표시할 값 (4자리)
-int seg7Digits[4] = {0, 0, 0, 0};
-bool seg7Enabled = false;
-int currentDigit = 0;  // 현재 표시 중인 디지트 (0-3)
-unsigned long lastSeg7Update = 0;
-#define SEG7_REFRESH_INTERVAL 5  // 각 디지트 표시 간격 (ms)
+#define PIN_SERVO_BEDROOM   14   // 커튼
+#define PIN_SERVO_GARAGE    15   // 차고문
+#define PIN_SERVO_ENTRANCE  16   // 현관문
 
 // ── PIR 센서 ─────────────────────────────────────────────────────
-#define PIN_PIR       27   // HC-SR501 OUT 핀 // *
+#define PIN_PIR       27   // HC-SR501 OUT 핀
 
 // ── PIR 모드 정의 ─────────────────────────────────────────────────
 #define PIR_MODE_OFF      0   // 비활성
@@ -179,10 +134,6 @@ void setup() {
   servoEntrance.write(0);
   Serial.println("[SERVO] 3개 초기화 완료 (침실/차고/현관)");
 
-  // ── 7세그먼트 초기화 ────────────────────────────────────────────
-  initSeg7();
-  Serial.println("[SEG7] 초기화 완료 (욕실) - 직접 핀 제어");
-
   // ── PIR 초기화 ───────────────────────────────────────────────
   pinMode(PIN_PIR, INPUT);
   lastMotionTime = millis();
@@ -219,9 +170,6 @@ void loop() {
 
   // PIR 감지 처리
   handlePir();
-  
-  // 7세그먼트 업데이트 (멀티플렉싱)
-  updateSeg7();
 }
 
 
@@ -319,13 +267,6 @@ void processCommand(String raw) {
     angle = constrain(angle, 0, 180);
     cmdServo(sv, angle, room);
     sendAck("servo", "ok");
-
-  // ── SEG7 ──────────────────────────────────────────────────────
-  } else if (strcmp(cmd, "seg7") == 0) {
-    const char* mode = doc["mode"]  | "num";
-    float       val  = doc["value"] | 0.0f;
-    cmdSeg7(mode, val);
-    sendAck("seg7", "ok");
 
   // ── PIR 모드 설정 ─────────────────────────────────────────────
   } else if (strcmp(cmd, "pir_mode") == 0) {
@@ -456,106 +397,6 @@ void cmdLed(int pin, bool on, const char* room) {
 void cmdServo(Servo* sv, int angle, const char* room) {
   sv->write(angle);
   Serial.printf("[SERVO] %s → %d도\n", room, angle);
-}
-
-void cmdSeg7(const char* mode, float value) {
-  if (strcmp(mode, "off") == 0) {
-    seg7Enabled = false;
-    clearSeg7();
-    Serial.println("[SEG7] OFF");
-    return;
-  }
-  
-  seg7Enabled = true;
-  
-  // 소수점 1자리 표시: 23.5 → 235 (소수점은 G 세그먼트로 표시 가능)
-  int display_val = (int)(value * 10);
-  
-  // 4자리로 분리
-  seg7Digits[0] = (display_val / 1000) % 10;  // 천의 자리
-  seg7Digits[1] = (display_val / 100) % 10;    // 백의 자리
-  seg7Digits[2] = (display_val / 10) % 10;     // 십의 자리
-  seg7Digits[3] = display_val % 10;             // 일의 자리
-  
-  // 소수점 표시 (세 번째 자리에 소수점)
-  // 이건 나중에 확장 가능
-  
-  Serial.printf("[SEG7] mode=%s value=%.1f → [%d][%d][%d][%d]\n", 
-                mode, value, seg7Digits[0], seg7Digits[1], seg7Digits[2], seg7Digits[3]);
-}
-
-
-// ================================================================
-// 7세그먼트 제어 함수
-// ================================================================
-
-void initSeg7() {
-  // 세그먼트 핀 초기화 (출력)
-  for (int i = 0; i < 7; i++) {
-    pinMode(segPins[i], OUTPUT);
-    digitalWrite(segPins[i], LOW);
-  }
-  
-  // 디지트 핀 초기화 (출력, HIGH=OFF)
-  for (int i = 0; i < 4; i++) {
-    pinMode(digitPins[i], OUTPUT);
-    digitalWrite(digitPins[i], HIGH);  // 모든 디지트 OFF
-  }
-  
-  // 초기값 0 표시
-  seg7Digits[0] = 0;
-  seg7Digits[1] = 0;
-  seg7Digits[2] = 0;
-  seg7Digits[3] = 0;
-  seg7Enabled = true;
-}
-
-void clearSeg7() {
-  // 모든 디지트 OFF
-  for (int i = 0; i < 4; i++) {
-    digitalWrite(digitPins[i], HIGH);
-  }
-  // 모든 세그먼트 OFF
-  for (int i = 0; i < 7; i++) {
-    digitalWrite(segPins[i], LOW);
-  }
-}
-
-void displayDigit(int digit, int number) {
-  // 이전 디지트 OFF
-  if (digit > 0) {
-    digitalWrite(digitPins[digit - 1], HIGH);
-  } else {
-    digitalWrite(digitPins[3], HIGH);
-  }
-  
-  // 세그먼트 모두 OFF
-  for (int i = 0; i < 7; i++) {
-    digitalWrite(segPins[i], LOW);
-  }
-  
-  // 해당 디지트 선택 (LOW)
-  digitalWrite(digitPins[digit], LOW);
-  
-  // 숫자 패턴 출력
-  for (int i = 0; i < 7; i++) {
-    digitalWrite(segPins[i], digitPatterns[number][i]);
-  }
-}
-
-void updateSeg7() {
-  if (!seg7Enabled) {
-    clearSeg7();
-    return;
-  }
-  
-  // 타이머 기반 멀티플렉싱 (각 디지트를 순차적으로 표시)
-  unsigned long now = millis();
-  if (now - lastSeg7Update >= SEG7_REFRESH_INTERVAL) {
-    displayDigit(currentDigit, seg7Digits[currentDigit]);
-    currentDigit = (currentDigit + 1) % 4;  // 다음 디지트로
-    lastSeg7Update = now;
-  }
 }
 
 // ================================================================

@@ -77,6 +77,9 @@ class WebSocketHub:
         self._clients: dict[str, WebSocket] = {}
         self._counter = 0                          # client_id 생성용 카운터
 
+        # DB 로깅 (main.py 에서 주입)
+        self.db_logger = None
+
     # ── 공개 API ────────────────────────────────────────────────────
 
     async def connect(self, websocket: WebSocket):
@@ -89,6 +92,14 @@ class WebSocketHub:
         client_id = self._next_id()
         self._clients[client_id] = websocket
         logger.info(f"[WS] 연결: {client_id} | 총 {len(self._clients)}개")
+
+        # DB 로깅: WebSocket 연결
+        if self.db_logger:
+            self.db_logger.log(
+                "ws_connect", "websocket_hub",
+                f"{client_id} 연결 (총 {len(self._clients)}개)",
+                detail={"client_id": client_id, "total": len(self._clients)},
+            )
 
         # 접속 콜백 - send_fn 함께 전달 (접속 직후 초기 데이터 push용)
         if self._on_connect:
@@ -198,6 +209,14 @@ class WebSocketHub:
                 pass
 
         logger.info(f"[WS] 해제 완료: {client_id} | 남은 {len(self._clients)}개")
+
+        # DB 로깅: WebSocket 해제
+        if self.db_logger:
+            self.db_logger.log(
+                "ws_disconnect", "websocket_hub",
+                f"{client_id} 해제 (남은 {len(self._clients)}개)",
+                detail={"client_id": client_id, "remaining": len(self._clients)},
+            )
 
         if self._on_disconnect:
             await self._safe_call(self._on_disconnect, client_id)

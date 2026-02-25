@@ -21,7 +21,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, HTTPException
+from fastapi import APIRouter, Query, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 
@@ -66,7 +66,7 @@ class CommandResponse(BaseModel):
 # 라우터 팩토리
 # ─────────────────────────────────────────────
 
-def create_router(tcp_server, ws_hub, command_router) -> APIRouter:
+def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRouter:
     """
     APIRouter 생성 및 엔드포인트 등록
 
@@ -75,6 +75,7 @@ def create_router(tcp_server, ws_hub, command_router) -> APIRouter:
     tcp_server      : TCPServer 인스턴스
     ws_hub          : WebSocketHub 인스턴스
     command_router  : CommandRouter 인스턴스
+    db_logger       : DBLogger 인스턴스 (선택)
     """
     router = APIRouter()
 
@@ -230,5 +231,143 @@ def create_router(tcp_server, ws_hub, command_router) -> APIRouter:
                 stt = app.state.stt_engine
                 return getattr(stt, 'state', 'N/A') if stt else 'DISABLED'
         return 'N/A'
+
+    # ── SR-3.2: 이벤트 로그 검색/조회 API ─────────────────────────
+
+    @router.get("/logs/search")
+    async def logs_search(
+        category:  Optional[str] = Query(None, description="이벤트 카테고리"),
+        date_from: Optional[str] = Query(None, description="시작일 (YYYY-MM-DD)"),
+        date_to:   Optional[str] = Query(None, description="종료일 (YYYY-MM-DD)"),
+        device_id: Optional[str] = Query(None, description="디바이스 ID"),
+        room:      Optional[str] = Query(None, description="공간"),
+        level:     Optional[str] = Query(None, description="로그 레벨"),
+        keyword:   Optional[str] = Query(None, description="summary 키워드"),
+        limit:     int = Query(100, ge=1, le=500, description="최대 반환 건수"),
+        offset:    int = Query(0, ge=0, description="오프셋"),
+    ):
+        """이벤트 로그 검색 (날짜/카테고리/디바이스 등 필터)"""
+        if not db_logger or not db_logger.enabled:
+            return {"items": [], "total": 0, "msg": "DB 비활성화 상태"}
+
+        items = await db_logger.search(
+            category=category, date_from=date_from, date_to=date_to,
+            device_id=device_id, room=room, level=level,
+            keyword=keyword, limit=limit, offset=offset,
+        )
+        total = await db_logger.count(
+            category=category, date_from=date_from, date_to=date_to,
+            device_id=device_id, room=room, level=level, keyword=keyword,
+        )
+        return {"items": items, "total": total}
+
+    @router.get("/logs/categories")
+    async def logs_categories():
+        """사용된 이벤트 카테고리 목록"""
+        if not db_logger or not db_logger.enabled:
+            return {"categories": []}
+        categories = await db_logger.get_categories()
+        return {"categories": categories}
+
+    @router.get("/logs/stats")
+    async def logs_stats():
+        """로그 통계 요약 (대시보드용)"""
+        if not db_logger or not db_logger.enabled:
+            return {"total": 0, "last_24h": 0, "by_category": {}}
+        stats = await db_logger.get_stats()
+        return stats
+
+    # ── SR-3.3: 패턴 분석 API ──────────────────────────────
+
+    @router.get("/logs/pattern/hourly")
+    async def logs_pattern_hourly(
+        date_from: Optional[str] = Query(None),
+        date_to:   Optional[str] = Query(None),
+        category:  Optional[str] = Query(None),
+        device_id: Optional[str] = Query(None),
+        day_type:  Optional[str] = Query(None, description="weekday|weekend"),
+    ):
+        """시간대별 활동 분포 (SR-3.3)"""
+        if not db_logger or not db_logger.enabled:
+            return {"items": []}
+        items = await db_logger.get_hourly_distribution(
+            date_from=date_from, date_to=date_to,
+            category=category, device_id=device_id, day_type=day_type,
+        )
+        return {"items": items}
+
+    @router.get("/logs/pattern/daily")
+    async def logs_pattern_daily(
+        date_from: Optional[str] = Query(None),
+        date_to:   Optional[str] = Query(None),
+        category:  Optional[str] = Query(None),
+        device_id: Optional[str] = Query(None),
+    ):
+        """일별 이벤트 타임라인 (SR-3.3)"""
+        if not db_logger or not db_logger.enabled:
+            return {"items": []}
+        items = await db_logger.get_daily_timeline(
+            date_from=date_from, date_to=date_to,
+            category=category, device_id=device_id,
+        )
+        return {"items": items}
+
+    @router.get("/logs/pattern/categories")
+    async def logs_pattern_categories(
+        date_from: Optional[str] = Query(None),
+        date_to:   Optional[str] = Query(None),
+        device_id: Optional[str] = Query(None),
+    ):
+        """카테고리별 분포 (SR-3.3)"""
+        if not db_logger or not db_logger.enabled:
+            return {"items": []}
+        items = await db_logger.get_category_distribution(
+            date_from=date_from, date_to=date_to, device_id=device_id,
+        )
+        return {"items": items}
+
+    @router.get("/logs/pattern/devices")
+    async def logs_pattern_devices(
+        date_from: Optional[str] = Query(None),
+        date_to:   Optional[str] = Query(None),
+        category:  Optional[str] = Query(None),
+    ):
+        """디바이스별 활동량 (SR-3.3)"""
+        if not db_logger or not db_logger.enabled:
+            return {"items": []}
+        items = await db_logger.get_device_activity(
+            date_from=date_from, date_to=date_to, category=category,
+        )
+        return {"items": items}
+
+    @router.get("/logs/pattern/anomalies")
+    async def logs_pattern_anomalies(
+        date_from: Optional[str] = Query(None),
+        date_to:   Optional[str] = Query(None),
+        threshold: float = Query(2.0, ge=1.5, le=5.0),
+    ):
+        """이상 패턴 탐지 (SR-3.3)"""
+        if not db_logger or not db_logger.enabled:
+            return {"avg_by_hour": [], "anomalies": []}
+        result = await db_logger.get_anomalies(
+            date_from=date_from, date_to=date_to, threshold=threshold,
+        )
+        return result
+
+    @router.get("/logs/{log_id}")
+    async def logs_detail(log_id: int):
+        """특정 이벤트 로그 상세 조회"""
+        if not db_logger or not db_logger.enabled:
+            raise HTTPException(status_code=503, detail="DB 비활성화 상태")
+        item = await db_logger.get_by_id(log_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="로그를 찾을 수 없음")
+
+        # 보안 이벤트인 경우 미디어 첨부
+        if item.get("event_category") == "security_alert":
+            media = await db_logger.get_security_media(log_id)
+            item["media"] = media
+
+        return item
 
     return router

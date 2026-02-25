@@ -335,6 +335,7 @@ class TCPServer:
         self.host = host
         self.port = port
         self.ws_broadcast = ws_broadcast
+        self.db_logger = None  # DBLogger (SR-3.1 이벤트 로그, main.py에서 설정)
 
         # device_id → ESP32Client
         self._registry: dict[str, ESP32Client] = {}
@@ -537,6 +538,13 @@ class TCPServer:
 
         logger.info(f"[TCP] 등록 완료: {device_id} | caps={caps} | ip={addr[0]}")
 
+        # DB 로그 (SR-3.1)
+        if self.db_logger:
+            self.db_logger.log("device_connect", "tcp_server",
+                               f"{device_id} 연결 | caps={caps} | ip={addr[0]}",
+                               device_id=device_id,
+                               detail={"caps": caps, "ip": addr[0]})
+
         # WebSocket 브로드캐스트 - 디바이스 목록 갱신
         await self._broadcast(ws_device_list(self.get_device_list()))
         return client
@@ -572,6 +580,12 @@ class TCPServer:
                if status == "ok" else f"{client.device_id} {cmd} → {status}")
         await self._broadcast(ws_cmd_result(status, msg))
 
+        # DB 로그 (SR-3.1)
+        if self.db_logger:
+            self.db_logger.log("device_ack", "tcp_server",
+                               f"{client.device_id} ACK: cmd={cmd} status={status}",
+                               device_id=client.device_id, detail=data)
+
     async def _on_sensor(self, client: ESP32Client, data: dict):
         device_type = data.get("device")
         temp     = data.get("temp")
@@ -592,6 +606,13 @@ class TCPServer:
         await self._broadcast(
             ws_sensor_data(client.device_id, temp=temp, humidity=humidity)
         )
+
+        # DB 로그 (SR-3.1)
+        if self.db_logger:
+            self.db_logger.log("sensor_data", "tcp_server",
+                               f"{client.device_id} 센서: temp={temp} humidity={humidity}",
+                               device_id=client.device_id,
+                               detail={"device": device_type, "temp": temp, "humidity": humidity})
 
     async def _on_error(self, client: ESP32Client, data: dict):
         msg = data.get("msg", "unknown error")
@@ -626,6 +647,14 @@ class TCPServer:
         }, ensure_ascii=False)
         await self._broadcast(ws_msg)
 
+        # DB 로깅: 보안 이벤트
+        if self.db_logger:
+            self.db_logger.log(
+                "security_alert", "tcp_server", alert_msg,
+                device_id=client.device_id, level="WARN",
+                detail={"event": event, "context": context, "detail": detail},
+            )
+
     async def _on_disconnect(self, client: Optional[ESP32Client], addr: tuple):
         if client:
             self._registry.pop(client.device_id, None)
@@ -633,6 +662,15 @@ class TCPServer:
             client.close()
             logger.info(f"[TCP] 해제: {client.device_id} ({addr})")
             await self._broadcast(ws_device_list(self.get_device_list()))
+
+            # DB 로깅: 디바이스 연결 해제
+            if self.db_logger:
+                self.db_logger.log(
+                    "device_disconnect", "tcp_server",
+                    f"{client.device_id} 연결 해제",
+                    device_id=client.device_id,
+                    detail={"addr": f"{addr[0]}:{addr[1]}"},
+                )
         else:
             logger.info(f"[TCP] 미등록 연결 해제: {addr}")
 
