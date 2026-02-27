@@ -86,6 +86,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import getpass
 import yaml
 import uvicorn
 from fastapi import FastAPI, Request
@@ -118,6 +119,23 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.yaml"
+ENV_PATH    = Path(__file__).parent.parent / ".env"
+
+def _load_env() -> dict[str, str]:
+    """`.env` 파일이 있으면 KEY=VALUE 파싱하여 dict 반환"""
+    env = {}
+    if not ENV_PATH.exists():
+        return env
+    with open(ENV_PATH, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip().strip('"').strip("'")
+    logger.info(f".env 로드 완료: {ENV_PATH}")
+    return env
 
 def load_settings() -> dict:
     if not CONFIG_PATH.exists():
@@ -126,6 +144,24 @@ def load_settings() -> dict:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     logger.info(f"설정 로드 완료: {CONFIG_PATH}")
+
+    env = _load_env()
+
+    # ── 민감 정보: .env → 터미널 입력 fallback ─────────────────
+    stt_cfg = cfg.get("stt", {})
+    if not stt_cfg.get("porcupine_access_key"):
+        stt_cfg["porcupine_access_key"] = env.get("PICOVOICE_ACCESS_KEY") or getpass.getpass("[설정] Picovoice Access Key: ")
+    if stt_cfg.get("mic_device") is None:
+        mic = env.get("MIC_DEVICE")
+        stt_cfg["mic_device"] = int(mic) if mic else int(input("[설정] 마이크 디바이스 번호: "))
+
+    db_cfg = cfg.get("database", {})
+    if db_cfg.get("enabled", False):
+        if not db_cfg.get("user"):
+            db_cfg["user"] = env.get("DB_USER") or input("[설정] DB 사용자명: ")
+        if not db_cfg.get("password"):
+            db_cfg["password"] = env.get("DB_PASSWORD") or getpass.getpass("[설정] DB 비밀번호: ")
+
     return cfg
 
 

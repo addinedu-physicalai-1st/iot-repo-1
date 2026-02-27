@@ -29,7 +29,7 @@ server:
 
 ollama:
   host: "http://localhost:11434"
-  model: "exaone3.5:latest"
+  model: "exaone3.5:7.8b"
   timeout: 30
 
 # ================================================================
@@ -70,10 +70,10 @@ stt:
   language: "ko"
   device: "cuda"
   wake_word: "자비스야"
-  porcupine_access_key: "7MPG0u7YUocUco+HH+48cQDyxc0tHB38TqbP+mpKIljNIBZ9cKheIA=="
+  porcupine_access_key: ""  # 서버 시작 시 터미널에서 입력
   porcupine_model_path: "models/자비스야_ko_linux_v4_0_0.ppn"
   porcupine_params_path: "models/porcupine_params_ko.pv"
-  mic_device: 10
+  mic_device:               # 서버 시작 시 터미널에서 입력
   vad_energy_threshold: 0.02
   noise_reduction: false
   noise_prop_decrease: 0.85
@@ -178,8 +178,8 @@ database:
   enabled: true             # false 시 DB 로깅 비활성화 (기존 동작 유지)
   host: "localhost"
   port: 3306
-  user: "your_db_user"
-  password: "your_db_password"
+  user: ""                  # 서버 시작 시 터미널에서 입력
+  password: ""              # 서버 시작 시 터미널에서 입력
   db: "iot_smart_home"
   pool_size: 5              # aiomysql 커넥션 풀 크기
   pool_recycle: 3600        # 커넥션 재활용 주기 (초)

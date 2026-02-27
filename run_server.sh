@@ -12,6 +12,11 @@
 #   DISABLE_TTS=1  : TTS 비활성화
 #   DISABLE_DB=1   : MySQL 이벤트 로깅 비활성화
 #
+# 민감 정보:
+#   .env 파일이 있으면 자동 로드 (DB_USER, DB_PASSWORD 등)
+#   없으면 터미널에서 입력
+#   설정 예시: cp .env_example .env
+#
 # 포트:
 #   8000 : FastAPI (HTTP + WebSocket)
 #   9000 : ESP32 TCP 서버
@@ -45,8 +50,20 @@ fi
 
 # MySQL 연결 확인 (DISABLE_DB가 아닐 때)
 if [ -z "$DISABLE_DB" ]; then
+    # .env 파일에서 DB 정보 로드
+    if [ -f .env ]; then
+        export $(grep -v '^#' .env | grep -E '^DB_' | xargs)
+    fi
     if command -v mysql &>/dev/null; then
-        if mysql -u your_db_user -pyour_db_password -e "USE iot_smart_home;" 2>/dev/null; then
+        db_user="${DB_USER:-}"
+        db_pass="${DB_PASSWORD:-}"
+        if [ -z "$db_user" ]; then read -p "DB 사용자명: " db_user; fi
+        if [ -n "$db_pass" ]; then
+            mysql_auth="-u $db_user -p$db_pass"
+        else
+            mysql_auth="-u $db_user -p"
+        fi
+        if mysql $mysql_auth -e "USE iot_smart_home;" 2>/dev/null; then
             echo "MySQL 연결 확인 완료 (iot_smart_home)"
         else
             echo "경고: MySQL 연결 실패 — DB 로깅이 자동 비활성화됩니다."

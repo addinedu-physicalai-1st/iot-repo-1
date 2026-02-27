@@ -1,5 +1,5 @@
 /*
- * esp32_client.ino
+ * main.cpp  (converted from esp32_client_last.ino)
  * ================
  * Voice IoT Controller - ESP32 단일 통합 클라이언트
  *
@@ -16,7 +16,7 @@
  *   차고  (garage)   : LED GPIO 12 / Servo GPIO 15
  *   현관  (entrance) : LED GPIO 13 / Servo GPIO 16
  *
- * 의존 라이브러리 (Arduino Library Manager):
+ * 의존 라이브러리 (PlatformIO lib_deps):
  *   - ArduinoJson     (6.x)
  *   - ESP32Servo
  *
@@ -30,6 +30,7 @@
  *   방범 모드: 움직임 감지 시 서버에 이벤트 전송 + 전체 조명 ON
  */
 
+#include <Arduino.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
@@ -46,7 +47,7 @@
 #define WIFI_PASSWORD  "201class2!"
 
 // ── TCP 서버 ──────────────────────────────────────────────────────
-#define SERVER_IP      "192.168.0.154"  // 서버 PC IP
+#define SERVER_IP      "192.168.0.52"  // 서버 PC IP (업로드 전 수정)
 #define SERVER_PORT    9000
 
 // ── 디바이스 ID ───────────────────────────────────────────────────
@@ -103,6 +104,26 @@ int           pirMode          = PIR_MODE_OFF;
 unsigned long lastMotionTime   = 0;   // 마지막 움직임 감지 시각
 unsigned long lastAlertTime    = 0;   // 마지막 알림 전송 시각
 bool          pirAlertSent     = false;
+
+
+// ================================================================
+// 함수 프로토타입
+// ================================================================
+
+void connectWiFi();
+void connectServer();
+void sendRegister();
+void processCommand(String raw);
+int resolveLedPin(const char* room);
+Servo* resolveServo(const char* room);
+void handlePir();
+void cmdPirMode(const char* mode);
+void allLightsOn();
+void sendPirEvent(const char* eventType, const char* detail);
+void cmdLed(int pin, bool on, const char* room);
+void cmdServo(Servo* sv, int angle, const char* room);
+void sendAck(const char* cmd, const char* status);
+void sendError(const char* errMsg);
 
 
 // ================================================================
@@ -324,7 +345,7 @@ void handlePir() {
     // 방범 모드: 움직임 감지 → 즉시 알림
     if (pirMode == PIR_MODE_GUARD) {
       if (now - lastAlertTime > PIR_ALERT_COOLDOWN_MS) {
-        Serial.println("[PIR] 🚨 방범모드 - 움직임 감지!");
+        Serial.println("[PIR] 방범모드 - 움직임 감지!");
         allLightsOn();
         sendPirEvent("guard_alert", "motion_detected");
         lastAlertTime = now;
@@ -335,7 +356,7 @@ void handlePir() {
     // 재실 모드: 4시간 이상 정적 → 이상 감지
     if (pirMode == PIR_MODE_PRESENCE && !pirAlertSent) {
       if (now - lastMotionTime > PIR_STATIC_TIMEOUT_MS) {
-        Serial.println("[PIR] ⚠️ 재실모드 - 장시간 정적 감지!");
+        Serial.println("[PIR] 재실모드 - 장시간 정적 감지!");
         sendPirEvent("presence_alert", "static_too_long");
         pirAlertSent  = true;
         lastAlertTime = now;

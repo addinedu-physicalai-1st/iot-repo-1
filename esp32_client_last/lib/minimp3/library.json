@@ -1,0 +1,7 @@
+{
+    "name": "minimp3",
+    "version": "1.0.0",
+    "description": "Minimalistic MP3 decoder single header library",
+    "frameworks": "*",
+    "platforms": "*"
+}

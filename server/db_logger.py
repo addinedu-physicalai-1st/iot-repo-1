@@ -69,8 +69,8 @@ class DBLogger:
             self._pool = await aiomysql.create_pool(
                 host=self._config.get("host", "localhost"),
                 port=self._config.get("port", 3306),
-                user=self._config.get("user", "iot_user"),
-                password=self._config.get("password", "iot_password"),
+                user=self._config.get("user", ""),
+                password=self._config.get("password", ""),
                 db=self._config.get("db", "iot_smart_home"),
                 minsize=1,
                 maxsize=self._config.get("pool_size", 5),
