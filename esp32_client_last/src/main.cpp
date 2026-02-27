@@ -34,6 +34,8 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
+#include "BluetoothA2DPSource.h"
+#include <math.h>
 
 
 
@@ -56,6 +58,12 @@
 
 // ── 타이밍 ────────────────────────────────────────────────────────
 #define RECONNECT_DELAY_MS  3000
+
+// ── BT 오디오 설정 ───────────────────────────────────────────────
+static const char *BT_TARGET_NAME = "PLEIGO BS15";   // BT 스피커 이름
+static const int   BT_SAMPLE_RATE = 44100;
+static const float BT_TONE_FREQ   = 440.0;           // A4 (라) 음
+static const float BT_TONE_VOLUME = 0.3;             // 볼륨 (0.0 ~ 1.0)
 
 
 // ================================================================
@@ -99,12 +107,56 @@ Servo servoEntrance;
 
 String rxBuffer = "";
 
+// ── BT A2DP ─────────────────────────────────────────────────────
+BluetoothA2DPSource a2dp_source;
+static float bt_phase = 0.0;
+static bool  bt_tone_on = true;
+
 // ── PIR 상태 변수 ─────────────────────────────────────────────────
 int           pirMode          = PIR_MODE_OFF;
 unsigned long lastMotionTime   = 0;   // 마지막 움직임 감지 시각
 unsigned long lastAlertTime    = 0;   // 마지막 알림 전송 시각
 bool          pirAlertSent     = false;
 
+
+// ================================================================
+// BT 오디오 콜백
+// ================================================================
+
+int32_t bt_audio_callback(Frame *frame, int32_t frame_count) {
+    float phase_inc = 2.0 * M_PI * BT_TONE_FREQ / BT_SAMPLE_RATE;
+    for (int i = 0; i < frame_count; i++) {
+        if (bt_tone_on) {
+            int16_t sample = (int16_t)(sinf(bt_phase) * 32767.0 * BT_TONE_VOLUME);
+            frame[i].channel1 = sample;
+            frame[i].channel2 = sample;
+            bt_phase += phase_inc;
+            if (bt_phase >= 2.0 * M_PI) bt_phase -= 2.0 * M_PI;
+        } else {
+            frame[i].channel1 = 0;
+            frame[i].channel2 = 0;
+        }
+    }
+    return frame_count;
+}
+
+void bt_connection_state_changed(esp_a2d_connection_state_t state, void *ptr) {
+    switch (state) {
+    case ESP_A2D_CONNECTION_STATE_DISCONNECTED:
+        Serial.println("[BT] DISCONNECTED");
+        break;
+    case ESP_A2D_CONNECTION_STATE_CONNECTING:
+        Serial.println("[BT] CONNECTING...");
+        break;
+    case ESP_A2D_CONNECTION_STATE_CONNECTED:
+        Serial.println("[BT] *** CONNECTED! ***");
+        Serial.println("[BT] 440Hz 톤이 스피커에서 들리면 BT 연결 성공!");
+        break;
+    case ESP_A2D_CONNECTION_STATE_DISCONNECTING:
+        Serial.println("[BT] DISCONNECTING...");
+        break;
+    }
+}
 
 // ================================================================
 // 함수 프로토타입
@@ -164,6 +216,13 @@ void setup() {
 
   connectWiFi();
   connectServer();
+
+  // ── BT A2DP 시작 ──────────────────────────────────────────────
+  Serial.println("[BT] A2DP 소스 시작...");
+  Serial.printf("[BT] Target: \"%s\"\n", BT_TARGET_NAME);
+  a2dp_source.set_on_connection_state_changed(bt_connection_state_changed);
+  a2dp_source.set_data_callback_in_frames(bt_audio_callback);
+  a2dp_source.start(BT_TARGET_NAME);
 }
 
 
@@ -191,6 +250,19 @@ void loop() {
 
   // PIR 감지 처리
   handlePir();
+
+  // 5초마다 BT 상태 출력
+  static unsigned long bt_last_ms = 0;
+  unsigned long now = millis();
+  if (now - bt_last_ms >= 5000) {
+    bt_last_ms = now;
+    Serial.printf("[Status] WiFi: %s | TCP: %s | BT: %s | Tone: %s | Uptime: %lus\n",
+                  WiFi.status() == WL_CONNECTED ? "OK" : "FAIL",
+                  tcpClient.connected() ? "OK" : "FAIL",
+                  a2dp_source.is_connected() ? "CONNECTED" : "NOT CONNECTED",
+                  bt_tone_on ? "ON" : "OFF",
+                  now / 1000);
+  }
 }
 
 
