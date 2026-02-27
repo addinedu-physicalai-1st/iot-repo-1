@@ -71,7 +71,8 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 DEVICE_LABEL: dict[str, str] = {
-    "esp32_home": "스마트홈",
+    "esp32_home1": "스마트홈1",
+    "esp32_home2": "스마트홈2",
 }
 
 # 폴링 대상 없음 (현재 구성에 자동 폴링 센서 없음)
@@ -127,12 +128,14 @@ class UnifiedStateManager:
     # ── 등록 / 해제 ──────────────────────────────────────────────
 
     def register(self, device_id: str, caps: list[str]):
-        """연결 시 초기 state 등록 — esp32_home: room별 GPIO 상태 초기화"""
+        """연결 시 초기 state 등록"""
         import time
         existing = self._states.get(device_id, {})
         state = {}
 
-        if device_id == "esp32_home":
+        if device_id in ("esp32_home", "esp32_home1"):
+            # esp32_home1: 침실 서보(GPIO2), 욕실 7seg/DHT11
+            # LED 핀은 없으나, 하위 호환을 위해 ALL_ROOMS 기반 초기화 유지
             for room in ALL_ROOMS:
                 led_key = f"led_{ROOM_LED_PIN[room]}"
                 state[led_key] = existing.get(led_key, 0)
@@ -140,6 +143,16 @@ class UnifiedStateManager:
                 if servo_pin is not None:
                     servo_key = f"servo_{servo_pin}"
                     state[servo_key] = existing.get(servo_key, 0)
+
+        elif device_id == "esp32_home2":
+            # esp32_home2: LED 5개 + 서보 2개(차고GPIO15, 현관GPIO16)
+            for room in ALL_ROOMS:
+                led_pin = ROOM_LED_PIN.get(room)
+                if led_pin is not None:
+                    state[f"led_{led_pin}"] = existing.get(f"led_{led_pin}", 0)
+            for servo_pin in [15, 16]:  # 차고, 현관 서보
+                state[f"servo_{servo_pin}"] = existing.get(f"servo_{servo_pin}", 0)
+
         else:
             # 하위 호환: 기존 개별 디바이스
             state = {
@@ -622,29 +635,51 @@ class TCPServer:
 
     async def _on_pir_event(self, client: ESP32Client, data: dict):
         """
-        PIR 이벤트 수신 처리 (v3.1)
-        ESP32 → TCP {"type":"pir_event","event":"guard_alert","detail":"...","context":"away"}
+        PIR 이벤트 수신 처리 (v3.2)
+        ESP32 → TCP {"type":"pir_event","location":"pir_living_room","event":"motion_detected",...}
         → WS 브로드캐스트 → 브라우저 pir_alert 수신
         """
-        event   = data.get("event",   "")
-        detail  = data.get("detail",  "")
-        context = data.get("context", "unknown")
+        event    = data.get("event",    "")
+        detail   = data.get("detail",   "")
+        context  = data.get("context",  "unknown")
+        location = data.get("location", "")
 
-        msg_map = {
+        # ── location 기반 메시지 매핑 ──────────────────────────────
+        location_msg_map = {
+            # esp32_home1 (거실 PIR)
+            ("pir_living_room", "motion_detected"): "🏠 실내(거실) 움직임 감지",
+            # esp32_home2 (게이트/입구 PIR)
+            ("pir_gate", "motion_detected"):  "🚪 게이트 움직임 감지",
+            ("pir_gate", "guard_alert"):      "🚨 방범 모드 — 게이트 침입 감지!",
+            ("pir_gate", "presence_alert"):   "⚠️ 장시간 움직임 없음 (게이트)",
+        }
+
+        # ── 기존 event+context 기반 메시지 매핑 ───────────────────
+        event_msg_map = {
             ("guard_alert",    "away"):  "🚨 외출 중 침입 감지!",
             ("guard_alert",    "sleep"): "🚨 취침 중 거실 침입 감지!",
             ("presence_alert", "home"):  "⚠️ 장시간 움직임 없음 — 괜찮으신가요?",
         }
-        alert_msg = msg_map.get((event, context), f"🔔 PIR 감지: {event} ({context})")
 
-        logger.warning(f"[TCP] ← {client.device_id} PIR: {alert_msg} | detail={detail}")
+        # location 우선, 없으면 event+context 조합으로 fallback
+        alert_msg = (
+            location_msg_map.get((location, event))
+            or event_msg_map.get((event, context))
+            or f"🔔 PIR 감지: {event} ({location or context})"
+        )
+
+        logger.warning(
+            f"[TCP] ← {client.device_id} PIR: {alert_msg} "
+            f"| location={location} event={event} detail={detail}"
+        )
 
         import json as _j
         ws_msg = _j.dumps({
-            "type":    "pir_alert",
-            "msg":     alert_msg,
-            "event":   event,
-            "context": context,
+            "type":     "pir_alert",
+            "msg":      alert_msg,
+            "event":    event,
+            "location": location,
+            "context":  context,
         }, ensure_ascii=False)
         await self._broadcast(ws_msg)
 
@@ -653,7 +688,8 @@ class TCPServer:
             self.db_logger.log(
                 "security_alert", "tcp_server", alert_msg,
                 device_id=client.device_id, level="WARN",
-                detail={"event": event, "context": context, "detail": detail},
+                detail={"event": event, "location": location,
+                        "context": context, "detail": detail},
             )
 
     async def _on_disconnect(self, client: Optional[ESP32Client], addr: tuple):

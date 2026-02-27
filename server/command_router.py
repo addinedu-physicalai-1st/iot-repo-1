@@ -76,7 +76,7 @@ from protocol.schema import (
     ws_cmd_result,
     cmd_led, cmd_servo, cmd_query, cmd_seg7,
     CMD_LED, CMD_SERVO, CMD_QUERY, CMD_SEG7,
-    DEVICE_HOME, ALL_DEVICES,
+    DEVICE_HOME, DEVICE_HOME1, DEVICE_HOME2, ALL_DEVICES,
     ROOM_LED_PIN, ROOM_SERVO_PIN, ROOM_LABEL,
     ALL_ROOMS,
 )
@@ -314,16 +314,18 @@ class CommandRouter:
         state = data.get("state")
         angle = data.get("angle")
 
-        client = self._tcp.get_device(DEVICE_HOME)
+        # LED/all_off/all_on 은 esp32_home2, servo는 home1(bedroom) + home2
+        led_device_id = DEVICE_HOME2 if self._tcp.get_device(DEVICE_HOME2) else DEVICE_HOME
+        client = self._tcp.get_device(led_device_id)
         if not client:
-            return ws_cmd_result("fail", "esp32_home 미연결")
+            return ws_cmd_result("fail", "esp32_home2 미연결")
 
         ok_cnt = 0
 
         if cmd == CMD_LED:
             for room in ALL_ROOMS:
                 payload = self._build_payload({"cmd": CMD_LED, "room": room, "state": state})
-                if payload and await self._tcp.send_command(DEVICE_HOME, payload):
+                if payload and await self._tcp.send_command(led_device_id, payload):
                     ok_cnt += 1
                     pin = ROOM_LED_PIN.get(room)
                     if pin is not None:
@@ -333,36 +335,37 @@ class CommandRouter:
             for room, pin in ROOM_SERVO_PIN.items():
                 if pin is None:
                     continue
+                target = DEVICE_HOME1 if room == "bedroom" else DEVICE_HOME2
+                if not self._tcp.get_device(target):
+                    target = DEVICE_HOME  # 하위 호환
                 payload = self._build_payload({"cmd": CMD_SERVO, "room": room, "angle": angle})
-                if payload and await self._tcp.send_command(DEVICE_HOME, payload):
+                if payload and await self._tcp.send_command(target, payload):
                     ok_cnt += 1
-                    client.state[f"servo_{pin}"] = angle
+                    t_client = self._tcp.get_device(target)
+                    if t_client:
+                        t_client.state[f"servo_{pin}"] = angle
 
         elif cmd == "all_off":
-            # LED 전체 끄기
             for room in ALL_ROOMS:
                 payload = self._build_payload({"cmd": CMD_LED, "room": room, "state": "off"})
-                if payload and await self._tcp.send_command(DEVICE_HOME, payload):
+                if payload and await self._tcp.send_command(led_device_id, payload):
                     ok_cnt += 1
                     pin = ROOM_LED_PIN.get(room)
                     if pin is not None:
                         client.state[f"led_{pin}"] = 0
-            # LED device_update WS 처리 후 음악 pause (타이밍 보장)
             import asyncio
             await asyncio.sleep(0.4)
             await self._handle_music({"cmd": "music", "action": "pause"})
             logger.info("[Router] all_off: 음악 pause 전송")
 
         elif cmd == "all_on":
-            # LED 전체 켜기
             for room in ALL_ROOMS:
                 payload = self._build_payload({"cmd": CMD_LED, "room": room, "state": "on"})
-                if payload and await self._tcp.send_command(DEVICE_HOME, payload):
+                if payload and await self._tcp.send_command(led_device_id, payload):
                     ok_cnt += 1
                     pin = ROOM_LED_PIN.get(room)
                     if pin is not None:
                         client.state[f"led_{pin}"] = 1
-            # LED device_update WS 처리 후 음악 play (타이밍 보장)
             import asyncio
             await asyncio.sleep(0.4)
             await self._handle_music({"cmd": "music", "action": "play"})
@@ -371,9 +374,8 @@ class CommandRouter:
         else:
             return ws_cmd_result("fail", f"all 브로드캐스트: 지원하지 않는 cmd={cmd}")
 
-        # 웹앱 상태 일괄 갱신
         from protocol.schema import ws_device_update
-        await self._tcp._broadcast(ws_device_update(DEVICE_HOME, client.state))
+        await self._tcp._broadcast(ws_device_update(led_device_id, client.state))
 
         if cmd == CMD_LED:
             total = len(ALL_ROOMS)
@@ -399,9 +401,11 @@ class CommandRouter:
         cmd = data.get("cmd")
         tts = data.get("tts_response", "")
 
-        client = self._tcp.get_device(DEVICE_HOME)
+        # PIR 모드 명령: LED 제어 포함 → esp32_home2 (LED 보유)
+        pir_device = DEVICE_HOME2 if self._tcp.get_device(DEVICE_HOME2) else DEVICE_HOME
+        client = self._tcp.get_device(pir_device)
         if not client:
-            return ws_cmd_result("fail", "esp32_home 미연결")
+            return ws_cmd_result("fail", "esp32_home2 미연결")
 
         # cmd → PIR 모드 + context 매핑
         pir_map = {
@@ -423,7 +427,7 @@ class CommandRouter:
                 "mode": "dnd",
                 "context": "dnd",
             }) + "\n").encode()
-            await self._tcp.send_command(DEVICE_HOME, payload)
+            await self._tcp.send_command(pir_device, payload)
             logger.info("[Router] 방해금지 모드 — ESP32 pir_mode:dnd 전송 (LED 차단)")
             msg = "방해금지 모드 설정 완료 — 모든 알람·팝업 무시, 로그 기록 유지"
             return ws_cmd_result("ok", msg)
@@ -445,7 +449,7 @@ class CommandRouter:
             "context": context,
         }) + "\n").encode()
 
-        success = await self._tcp.send_command(DEVICE_HOME, payload)
+        success = await self._tcp.send_command(pir_device, payload)
         if not success:
             return ws_cmd_result("fail", f"PIR 모드 설정 실패: {pir_mode}")
 
@@ -455,7 +459,7 @@ class CommandRouter:
         if self._db:
             self._db.log("pir_mode", "command_router",
                          f"PIR {pir_mode} 모드 설정 (context={context})",
-                         device_id="esp32_home",
+                         device_id=pir_device,
                          detail={"cmd": cmd, "pir_mode": pir_mode, "context": context})
         # ── away_mode / sleep_mode: 전체 조명 OFF ──────────────────
         if cmd in ("away_mode", "sleep_mode"):
@@ -478,16 +482,15 @@ class CommandRouter:
                     payload_led = self._build_payload({
                         "cmd": "led", "room": room, "state": state_str
                     })
-                    if payload_led and await self._tcp.send_command(DEVICE_HOME, payload_led):
+                    if payload_led and await self._tcp.send_command(pir_device, payload_led):
                         client.state[f"led_{pin}"] = prev_state
                         restored += 1
                 logger.info(f"[Router] {cmd}: LED 이전 상태 복원 ({restored}개)")
             else:
                 logger.info(f"[Router] {cmd}: LED 스냅샷 없음 — 복원 생략")
 
-            # 웹앱 상태 갱신
             from protocol.schema import ws_device_update
-            await self._tcp._broadcast(ws_device_update(DEVICE_HOME, client.state))
+            await self._tcp._broadcast(ws_device_update(pir_device, client.state))
 
         msg = f"PIR {pir_mode} 모드 설정 완료 (context={context})"
         if tts:
@@ -509,14 +512,14 @@ class CommandRouter:
         import asyncio
         import json as _j
 
-        client = self._tcp.get_device(DEVICE_HOME)
+        pir_device = DEVICE_HOME2 if self._tcp.get_device(DEVICE_HOME2) else DEVICE_HOME
+        client = self._tcp.get_device(pir_device)
         if not client:
-            return ws_cmd_result("fail", "esp32_home 미연결")
+            return ws_cmd_result("fail", "esp32_home2 미연결")
 
         snapshot = client.state.pop("_led_snapshot", None)
 
         if snapshot:
-            # 스냅샷 있음 → 이전 LED 상태 복원
             await asyncio.sleep(0.1)
             from protocol.schema import ROOM_LED_PIN
             restored = 0
@@ -528,18 +531,16 @@ class CommandRouter:
                 payload_led = self._build_payload({
                     "cmd": "led", "room": room, "state": state_str
                 })
-                if payload_led and await self._tcp.send_command(DEVICE_HOME, payload_led):
+                if payload_led and await self._tcp.send_command(pir_device, payload_led):
                     client.state[f"led_{pin}"] = prev_state
                     restored += 1
             logger.info(f"[Router] pir_dismiss: LED 스냅샷 복원 ({restored}개)")
         else:
-            # 스냅샷 없음 → 전체 소등
             await self._execute_all_broadcast({"cmd": "all_off"})
             logger.info("[Router] pir_dismiss: 스냅샷 없음 — all_off 실행")
 
-        # 웹앱 상태 갱신 브로드캐스트
         from protocol.schema import ws_device_update
-        await self._tcp._broadcast(ws_device_update(DEVICE_HOME, client.state))
+        await self._tcp._broadcast(ws_device_update(pir_device, client.state))
 
         return ws_cmd_result("ok", "PIR 알림 해제 — LED 복원 완료")
 
@@ -588,21 +589,19 @@ class CommandRouter:
         if not (10.0 <= value <= 40.0):
             return ws_cmd_result("fail", f"온도 범위 초과: {value}°C (10~40°C)")
 
-        # ESP32에 seg7 명령 전송 (실제 7세그먼트 있을 때 사용)
-        client = self._tcp.get_device(DEVICE_HOME)
-        if not client:
-            logger.warning("[Router] DEVICE_HOME 연결 안됨")
-            return
-
-        payload = {
-            "cmd": "seg7",
-            "mode": "number",
-            "value": float(value)
-        }
-
-        message = (_j.dumps(payload) + "\n").encode()
-
-        await self._tcp.send_command(DEVICE_HOME, message)
+        # ESP32 seg7 명령 전송 (esp32_home1에 7세그먼트 있음)
+        seg7_device = DEVICE_HOME1 if self._tcp.get_device(DEVICE_HOME1) else DEVICE_HOME
+        client = self._tcp.get_device(seg7_device)
+        if client:
+            payload = {
+                "cmd": "seg7",
+                "mode": "number",
+                "value": float(value)
+            }
+            message = (_j.dumps(payload) + "\n").encode()
+            await self._tcp.send_command(seg7_device, message)
+        else:
+            logger.warning("[Router] DEVICE_HOME1 연결 안됨 — seg7 전송 생략")
 
         logger.info(f"[Router] SEG7 전송 완료: {value:.1f}°C")
 
@@ -621,7 +620,7 @@ class CommandRouter:
         # DB 로그 (SR-3.1)
         if self._db:
             self._db.log("bathroom_temp", "command_router", msg,
-                         device_id="esp32_home", room="bathroom",
+                         device_id=DEVICE_HOME1, room="bathroom",
                          detail={"action": "set", "value": value})
 
         if tts:
@@ -661,7 +660,7 @@ class CommandRouter:
         # DB 로그
         if self._db:
             self._db.log("heating", "command_router", msg,
-                         device_id="esp32_home", room="bathroom",
+                         device_id=DEVICE_HOME1, room="bathroom",
                          detail={"state": state})
 
         tts = data.get("tts_response", "")
@@ -675,23 +674,30 @@ class CommandRouter:
 
     async def _handle_status(self, data: dict) -> str:
         """
-        v2: esp32_home 단일 디바이스 → room별 상태 분리 표시
+        v3: esp32_home1 + esp32_home2 이중 구성 → room별 상태 분리 표시
         """
         target = data.get("target", "all")
-        room   = data.get("room", "all")   # 특정 room 또는 "all"
+        room   = data.get("room", "all")
 
         sm       = self._tcp.state_manager
-        snapshot = sm.get_snapshot("esp32_home")
+        snapshot = sm.get_snapshot("all")
 
-        if not snapshot:
+        # home1(서보/온도) + home2(LED/서보) 상태 병합
+        home1_state = snapshot.get(DEVICE_HOME1, {}).get("state", {})
+        home2_state = snapshot.get(DEVICE_HOME2, {}).get("state", {})
+        # 구버전 하위 호환
+        if not home1_state and not home2_state:
+            home1_state = snapshot.get(DEVICE_HOME, {}).get("state", {})
+        home_state = {**home2_state, **home1_state}  # home1이 우선 (servo/temp)
+
+        if not home_state:
             msg = "스마트홈이 연결되어 있지 않습니다."
             return _json.dumps({
                 "type": "cmd_result", "status": "status",
                 "msg": msg, "tts_response": msg, "status_data": {},
             }, ensure_ascii=False)
 
-        home_state = snapshot.get("esp32_home", {}).get("state", {})
-        music      = snapshot.get("_music", {})
+        music = snapshot.get("_music", {})
 
         # room별 상태 분리
         status_data = {}
@@ -980,15 +986,45 @@ class CommandRouter:
 
     def _resolve_device(self, data: dict) -> Optional[str]:
         """
-        v2: 단일 esp32_home 통합
-          - 항상 DEVICE_HOME 반환 (연결 여부만 확인)
-          - room 필드는 _build_payload()에서 핀 매핑에 사용
+        v3: esp32_home1 / esp32_home2 이중 구성
+          - led          → esp32_home2 (LED 5개)
+          - servo        → room=bedroom → esp32_home1 (침실 커튼)
+                           room=garage/entrance → esp32_home2
+          - seg7         → esp32_home1 (욕실 7세그)
+          - 명시된 device_id가 있으면 그대로 사용
+          - 구버전 esp32_home 연결 시 하위 호환 지원
         """
         if data.get("device_id") == "all":
             return None
 
-        # 단일 ESP32: esp32_home 고정
-        return DEVICE_HOME
+        # 명시적 device_id 지정 (구버전 "esp32_home" 은 legacy로 무시 → cmd+room 라우팅)
+        explicit = data.get("device_id", "")
+        if explicit and explicit not in ("all", DEVICE_HOME):
+            return explicit
+
+        cmd  = data.get("cmd", "")
+        room = data.get("room", "")
+
+        # LED → home2
+        if cmd == CMD_LED:
+            return DEVICE_HOME2
+
+        # 서보: 침실 커튼 → home1 / 차고·현관 → home2
+        if cmd == CMD_SERVO:
+            if room == "bedroom":
+                return DEVICE_HOME1
+            return DEVICE_HOME2
+
+        # 7세그 → home1 (욕실)
+        if cmd == CMD_SEG7:
+            return DEVICE_HOME1
+
+        # 구버전 esp32_home 연결 시 하위 호환
+        if self._tcp.get_device(DEVICE_HOME):
+            return DEVICE_HOME
+
+        # 기본: home1 (seg7/heating/온도 관련)
+        return DEVICE_HOME1
 
     def _build_payload(self, data: dict) -> Optional[bytes]:
         """
@@ -1053,7 +1089,8 @@ class CommandRouter:
             "어때", "어떻게", "점검", "알려줘"
         ])
 
-        base = {"device_id": "esp32_home"}
+        # base: room만 포함, device_id는 _resolve_device()가 cmd+room 기반 자동 결정
+        base = {}
         if room:
             base["room"] = room
 
@@ -1062,7 +1099,7 @@ class CommandRouter:
             if any(k in text for k in ["불", "전등", "조명"]): target = "led"
             elif any(k in text for k in ["문", "서보", "커튼"]): target = "servo"
             r = room if (room and not is_all) else "all"
-            return {"cmd": "status", "device_id": "esp32_home", "room": r, "target": target}
+            return {"cmd": "status", "room": r, "target": target}
 
         if any(k in text for k in ["켜", "켜줘", "불 켜", "조명 켜"]):
             if is_all:
@@ -1076,27 +1113,25 @@ class CommandRouter:
 
         if is_power_off or is_led_only:
             if is_all:
-                # "전체 꺼줘 / 모두 꺼줘 / 전체 전등 꺼 / 전체 불 꺼" → 모두 all_off
-                # is_led_only 여부 무관 (STT가 "전등" 붙여도 동일 처리)
                 return {"cmd": "all_off", "device_id": "all"}
             if not room:
                 return {"cmd": CMD_LED, "state": "off", "device_id": "all"}
             return {**base, "cmd": CMD_LED, "state": "off"}
 
         if any(k in text for k in ["커튼 열", "커튼 올려"]):
-            return {"cmd": CMD_SERVO, "angle": 90, "device_id": "esp32_home", "room": "bedroom"}
+            return {"cmd": CMD_SERVO, "angle": 90, "room": "bedroom"}
         if any(k in text for k in ["커튼 닫", "커튼 내려"]):
-            return {"cmd": CMD_SERVO, "angle": 0, "device_id": "esp32_home", "room": "bedroom"}
+            return {"cmd": CMD_SERVO, "angle": 0, "room": "bedroom"}
 
         if any(k in text for k in ["차고문 열", "차고 열"]):
-            return {"cmd": CMD_SERVO, "angle": 90, "device_id": "esp32_home", "room": "garage"}
+            return {"cmd": CMD_SERVO, "angle": 90, "room": "garage"}
         if any(k in text for k in ["차고문 닫", "차고 닫"]):
-            return {"cmd": CMD_SERVO, "angle": 0,  "device_id": "esp32_home", "room": "garage"}
+            return {"cmd": CMD_SERVO, "angle": 0, "room": "garage"}
 
         if any(k in text for k in ["현관문 열", "현관 열"]):
-            return {"cmd": CMD_SERVO, "angle": 90, "device_id": "esp32_home", "room": "entrance"}
+            return {"cmd": CMD_SERVO, "angle": 90, "room": "entrance"}
         if any(k in text for k in ["현관문 닫", "현관 닫"]):
-            return {"cmd": CMD_SERVO, "angle": 0,  "device_id": "esp32_home", "room": "entrance"}
+            return {"cmd": CMD_SERVO, "angle": 0, "room": "entrance"}
 
         if any(k in text for k in ["열어", "열어줘", "문 열"]) and room:
             return {**base, "cmd": CMD_SERVO, "angle": 90}
@@ -1112,28 +1147,28 @@ class CommandRouter:
         if any(k in text for k in ["이전 곡", "이전곡"]):
             return {"cmd": "music", "action": "prev"}
 
-        # ── PIR 모드 키워드 (v2.2) ────────────────────────────────────
+        # ── PIR 모드 키워드 ───────────────────────────────────────────
+        # PIR 명령은 _execute_pir_mode() 에서 pir_device(home2)로 직접 라우팅
         if any(k in text for k in ["외출", "나갈게", "나간다", "외출해"]):
-            return {"cmd": "away_mode", "device_id": "esp32_home"}
+            return {"cmd": "away_mode"}
         if any(k in text for k in ["귀가", "돌아왔어", "집에 왔어", "귀가했어"]):
-            return {"cmd": "home_mode", "device_id": "esp32_home"}
+            return {"cmd": "home_mode"}
         if any(k in text for k in ["잘게", "잠자리", "취침", "자러 갈게"]):
-            return {"cmd": "sleep_mode", "device_id": "esp32_home"}
+            return {"cmd": "sleep_mode"}
         if any(k in text for k in ["일어났어", "기상", "아침이야", "일어났다"]):
-            return {"cmd": "wake_mode", "device_id": "esp32_home"}
+            return {"cmd": "wake_mode"}
 
-        # ── 욕실 현재온도 조회 키워드 (v2.4) ─────────────────────────
-        # 숫자 없이 온도를 물어보는 경우 → 설정 온도 안내
+        # ── 욕실 현재온도 조회 키워드 ─────────────────────────────────
         if any(k in text for k in ["욕실", "목욕탕"]) and any(k in text for k in ["몇 도", "몇도", "온도 알려", "온도 확인", "온도 어때", "온도야", "온도 몇"]):
-            return {"cmd": "query_bathroom_temp", "device_id": "esp32_home"}
+            return {"cmd": "query_bathroom_temp"}
 
-        # ── 욕실 희망온도 설정 키워드 (v2.3) ─────────────────────────
+        # ── 욕실 희망온도 설정 키워드 ─────────────────────────────────
         if any(k in text for k in ["욕실", "목욕탕"]) and any(k in text for k in ["온도", "도로", "도 설정", "도 맞춰"]):
             import re as _re
             m = _re.search(r'(\d+(?:\.\d+)?)\s*도', text)
             if m:
                 val = float(m.group(1))
                 if 10.0 <= val <= 40.0:
-                    return {"cmd": "set_bathroom_temp", "device_id": "esp32_home", "value": val}
+                    return {"cmd": "set_bathroom_temp", "value": val}
 
         return None

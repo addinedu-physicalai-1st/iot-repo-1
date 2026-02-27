@@ -155,16 +155,22 @@ devices:
 
 # ================================================================
 # LLM 명령 → device_id 매핑 키워드
+# v3: esp32_home1 (침실서보/욕실seg7·DHT11) + esp32_home2 (LED5개/차고·현관서보/PIR)
 # ================================================================
 command_keywords:
-  차고:   "esp32_garage"
-  차고문:  "esp32_garage"
-  욕실:   "esp32_bathroom"
-  화장실:  "esp32_bathroom"
-  침실:   "esp32_bedroom"
-  방:     "esp32_bedroom"
-  현관:   "esp32_entrance"
-  현관문:  "esp32_entrance"
+  # LED 명령 → esp32_home2 (5개 LED 모두 home2에 있음)
+  # 서보 명령: 침실 커튼 → esp32_home1, 차고/현관 → esp32_home2
+  # _resolve_device() 에서 cmd+room 기반으로 자동 라우팅
+  # 이 키워드는 명시적 device_id 없이 room만 전달될 때 사용됨 (구버전 호환)
+  차고:   "esp32_home2"
+  차고문:  "esp32_home2"
+  욕실:   "esp32_home1"
+  화장실:  "esp32_home1"
+  침실:   "esp32_home1"
+  방:     "esp32_home1"
+  현관:   "esp32_home2"
+  현관문:  "esp32_home2"
+  거실:   "esp32_home2"
 
 seg7_mode_keywords:
   온도:  "temp"

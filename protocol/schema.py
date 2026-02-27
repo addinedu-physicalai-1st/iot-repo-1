@@ -53,17 +53,19 @@ SERVO_DOOR_CLOSE = 0
 SERVO_DOOR_OPEN  = 90
 
 # ── ESP32 디바이스 ID ─────────────────────────────────
-# v2: 단일 esp32_home 통합
-DEVICE_HOME = "esp32_home"
+# v3: esp32_home1 (servo침실/seg7/DHT11) + esp32_home2 (LED5개/servo차고현관/PIR)
+DEVICE_HOME  = "esp32_home"   # 하위 호환 (단일 통합 구버전)
+DEVICE_HOME1 = "esp32_home1"  # 침실커튼 서보, 욕실 7seg/DHT11, 거실 PIR
+DEVICE_HOME2 = "esp32_home2"  # 거실/욕실/침실/차고/현관 LED 5개, 차고/현관 서보, PIR
 
-# 하위 호환용
+# 하위 호환용 (구버전 개별 디바이스)
 DEVICE_GARAGE   = "esp32_garage"
 DEVICE_BATHROOM = "esp32_bathroom"
 DEVICE_BEDROOM  = "esp32_bedroom"
 DEVICE_ENTRANCE = "esp32_entrance"
 DEVICE_LIVING   = "esp32_living"
 
-ALL_DEVICES = (DEVICE_HOME,)
+ALL_DEVICES = (DEVICE_HOME1, DEVICE_HOME2)
 
 # ── room 식별자 ───────────────────────────────────────
 ROOM_LIVING   = "living"

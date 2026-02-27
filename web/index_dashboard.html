@@ -1971,7 +1971,7 @@ function connectWS() {
     log('WebSocket 연결', 'info');
     clearTimeout(wsRetryTimer);
     // 서버 상태 요청 → pir_mode 동기화
-    setTimeout(() => sendWS({ type:'llm_cmd', cmd:'status', device_id:'esp32_home', target:'all' }), 300);
+    setTimeout(() => sendWS({ type:'llm_cmd', cmd:'status', target:'all' }), 300);
   };
 
   ws.onclose = () => {
@@ -2098,9 +2098,11 @@ function handleServerMsg(data) {
 // ════════════════════════════════════════════
 // 디바이스 상태 업데이트
 // ════════════════════════════════════════════
-// v2: esp32_home 단일 통합
+// v3: esp32_home1 (침실서보/욕실DHT11·seg7) + esp32_home2 (LED5개/차고·현관서보)
 const DEVICE_MAP = {
-  'esp32_home':     null,
+  'esp32_home':  null,   // 구버전 하위 호환
+  'esp32_home1': null,   // 침실 서보 + 욕실 DHT11/seg7
+  'esp32_home2': null,   // LED 5개 + 차고/현관 서보
   'esp32_garage':   'garage',
   'esp32_bathroom': 'bathroom',
   'esp32_bedroom':  'bedroom',
@@ -2109,13 +2111,15 @@ const DEVICE_MAP = {
 };
 const ROOM_LED_PIN   = { living:2, bathroom:4, bedroom:5, garage:12, entrance:13 };
 const ROOM_SERVO_PIN = { bedroom:14, garage:15, entrance:16 };
+// esp32_home1: 침실 서보 실제 GPIO는 2, esp32_home2: 차고15 현관16
+const HOME_DEVICE_IDS = new Set(['esp32_home', 'esp32_home1', 'esp32_home2']);
 
 function updateDeviceList(devices) {
   const ALL_ROOMS = ['living','bathroom','bedroom','garage','entrance'];
   ALL_ROOMS.forEach(key => setDeviceOnline(key, false));
 
   devices.forEach(d => {
-    if (d.device_id === 'esp32_home') {
+    if (HOME_DEVICE_IDS.has(d.device_id)) {
       ALL_ROOMS.forEach(key => setDeviceOnline(key, true));
     } else {
       const key = DEVICE_MAP[d.device_id];
@@ -2148,8 +2152,8 @@ function setDeviceOnline(key, online) {
 }
 
 function updateDeviceState(device_id, state) {
-  // v2: esp32_home → room별 핀으로 분리 처리
-  if (device_id === 'esp32_home') {
+  // v3: esp32_home / esp32_home1 / esp32_home2 → room별 핀으로 분리 처리
+  if (HOME_DEVICE_IDS.has(device_id)) {
     const ALL_ROOMS = ['living','bathroom','bedroom','garage','entrance'];
     ALL_ROOMS.forEach(room => {
       const lpin = ROOM_LED_PIN[room];
@@ -2165,6 +2169,15 @@ function updateDeviceState(device_id, state) {
         if (valEl)  valEl.textContent = angle + '°';
         if (room === 'bedroom') updateCurtainStatus(angle);
         else                    updateDoorStatus(room, angle);
+      }
+      // esp32_home1: 침실 서보는 GPIO 2 (servo_2)
+      if (room === 'bedroom' && state['servo_2'] !== undefined) {
+        const angle  = state['servo_2'];
+        const slider = document.querySelector('#card-bedroom .servo-slider');
+        const valEl  = document.getElementById('servo-bedroom-val');
+        if (slider) slider.value = angle;
+        if (valEl)  valEl.textContent = angle + '°';
+        updateCurtainStatus(angle);
       }
     });
     return;
@@ -2190,8 +2203,8 @@ function updateDeviceState(device_id, state) {
 }
 
 function updateSensor(device_id, temp, humidity, room) {
-  // esp32_home + room='bathroom' → 욕실 DHT11 현재온도 업데이트
-  if (device_id === 'esp32_home' && room === 'bathroom') {
+  // esp32_home / esp32_home1 + room='bathroom' → 욕실 DHT11 현재온도 업데이트
+  if ((device_id === 'esp32_home' || device_id === 'esp32_home1') && room === 'bathroom') {
     if (temp != null) {
       document.getElementById('temp-bathroom').textContent = temp.toFixed(1);
       _currentTemp = temp;
@@ -2273,8 +2286,8 @@ function syncBadgeFromCmdResult(data) {
 }
 
 function sendLed(key, pin, state) {
-  // v2: esp32_home + room
-  sendCmd({ cmd:'led', room: key, state, device_id: 'esp32_home' });
+  // v3: device_id 생략 → 서버가 cmd+room 기반으로 esp32_home2 자동 라우팅
+  sendCmd({ cmd:'led', room: key, state });
   updateLedStatus(key, state);
 }
 
@@ -2294,8 +2307,8 @@ function updateLedStatus(key, state) {
 
 // ── 차고문/현관문 제어 + 상태 뱃지 업데이트 ─────────────────────────
 function sendDoor(key, angle) {
-  // v2: esp32_home + room
-  sendCmd({ cmd:'servo', room: key, angle, device_id: 'esp32_home' });
+  // v3: device_id 생략 → 서버가 room 기반으로 esp32_home1/home2 자동 라우팅
+  sendCmd({ cmd:'servo', room: key, angle });
   // 슬라이더 동기화
   const slider = document.querySelector(`#card-${key} .servo-slider`);
   const valEl  = document.getElementById(`servo-${key}-val`);
@@ -2320,7 +2333,8 @@ function updateDoorStatus(key, angle) {
 
 // ── 커튼 제어 + 상태 뱃지 업데이트 ─────────────────────────────────
 function sendCurtain(angle) {
-  sendCmd({ cmd:'servo', room:'bedroom', angle, device_id:'esp32_home' });
+  // v3: bedroom servo → 서버가 esp32_home1으로 자동 라우팅
+  sendCmd({ cmd:'servo', room:'bedroom', angle });
   // 슬라이더 동기화
   const slider = document.querySelector('#card-bedroom .servo-slider');
   const valEl  = document.getElementById('servo-bedroom-val');
@@ -2506,7 +2520,7 @@ function applyTarget(room) {
 
   if (room === 'bathroom') {
     setBathroomTempDisplay(target);
-    sendCmd({cmd:'set_bathroom_temp', device_id:'esp32_home', value:target});
+    sendCmd({cmd:'set_bathroom_temp', value:target});
     // 난방이 켜져 있으면 희망온도 디스플레이 즉시 갱신 + 7seg 전송
     if (_heatingOn) {
       const targetVal  = document.getElementById('btd-target-val');
@@ -2550,9 +2564,9 @@ function updateHeatingActiveStyle() {
 
 // 7세그먼트에 희망온도 전송 (ESP32에서 3초 후 현재온도로 자동 복귀)
 function sendSeg7TargetTemp(targetVal) {
+  // seg7 → 서버가 esp32_home1으로 자동 라우팅
   sendCmd({
     cmd: 'seg7',
-    device_id: 'esp32_home',
     room: 'bathroom',
     mode: 'target_temp',
     value: parseFloat(targetVal),
@@ -2561,7 +2575,7 @@ function sendSeg7TargetTemp(targetVal) {
 
 function toggleHeating() {
   _heatingOn = !_heatingOn;
-  sendCmd({cmd:'heating', device_id:'esp32_home', room:'bathroom', state: _heatingOn ? 'on' : 'off'});
+  sendCmd({cmd:'heating', room:'bathroom', state: _heatingOn ? 'on' : 'off'});
   updateHeatingUI(_heatingOn);
   // 난방 ON: 7세그먼트에 희망온도 3초 표시
   if (_heatingOn) {
@@ -2623,7 +2637,7 @@ function setSeg7Mode(mode) {
     : parseFloat(document.getElementById('temp-bathroom').textContent); // 욕실은 온도만
 
   if (!isNaN(val)) {
-    sendCmd({cmd:'seg7',pin_clk:22,pin_dio:23,mode,value:val,device_id:'esp32_home',room:'bathroom'});
+    sendCmd({cmd:'seg7', mode, value:val, room:'bathroom'});
   }
 }
 
@@ -2903,7 +2917,7 @@ const PIR_MODE_CONFIG = {
 };
 
 function setPirMode(cmd) {
-  sendWS({ type:'llm_cmd', cmd:cmd, device_id:'esp32_home' });
+  sendWS({ type:'llm_cmd', cmd:cmd });
   _updatePirUI(cmd);
   localStorage.setItem('pir_mode', cmd);
   const labels = { away_mode:'외출', home_mode:'귀가', sleep_mode:'취침', wake_mode:'기상', dnd_mode:'방해금지' };
@@ -3000,7 +3014,7 @@ function closeCctvModal() {
 function dismissAlert() {
   closeCctvModal();
   // 서버에 pir_dismiss 명령 전송 → LED 스냅샷 복원 또는 all_off
-  sendCmd({ cmd: 'pir_dismiss', device_id: 'esp32_home' });
+  sendCmd({ cmd: 'pir_dismiss' });
   log('✅ 보안 경고 해제 — LED 복원 중...', 'ok');
   const badge = document.getElementById('pir-alert-badge');
   badge.className   = 'pir-alert-badge';
@@ -3964,7 +3978,7 @@ function camAlertConfirm() {
   updateCamBadge('clear', 'CLEAR');
   camAlertClose();
   // LED 복원 (PIR 스냅샷 복원 또는 all_off)
-  sendCmd({ cmd: 'pir_dismiss', device_id: 'esp32_home' });
+  sendCmd({ cmd: 'pir_dismiss' });
   log('✅ 현관 경고 해제 — LED 복원 중...', 'ok');
 }
 function camAlertClose() {
