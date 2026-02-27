@@ -590,10 +590,11 @@ class TCPServer:
         device_type = data.get("device")
         temp     = data.get("temp")
         humidity = data.get("humidity")
+        room     = data.get("room")
 
         logger.info(
             f"[TCP] ← {client.device_id} SENSOR: "
-            f"device={device_type} temp={temp} humidity={humidity}"
+            f"device={device_type} room={room} temp={temp} humidity={humidity}"
         )
 
         if temp     is not None: client.state["temp"]     = temp
@@ -604,15 +605,15 @@ class TCPServer:
         )
 
         await self._broadcast(
-            ws_sensor_data(client.device_id, temp=temp, humidity=humidity)
+            ws_sensor_data(client.device_id, temp=temp, humidity=humidity, room=room)
         )
 
         # DB 로그 (SR-3.1)
         if self.db_logger:
             self.db_logger.log("sensor_data", "tcp_server",
-                               f"{client.device_id} 센서: temp={temp} humidity={humidity}",
+                               f"{client.device_id} 센서: room={room} temp={temp} humidity={humidity}",
                                device_id=client.device_id,
-                               detail={"device": device_type, "temp": temp, "humidity": humidity})
+                               detail={"device": device_type, "room": room, "temp": temp, "humidity": humidity})
 
     async def _on_error(self, client: ESP32Client, data: dict):
         msg = data.get("msg", "unknown error")

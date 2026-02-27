@@ -484,6 +484,44 @@ header {
 .status-badge.closed { border-color:rgba(255,64,96,0.3); background:rgba(255,64,96,0.05); }
 .status-badge.closed .status-val { color:var(--red); }
 
+/* ── 토글 스위치 ── */
+.ts-row { display:flex; flex-direction:column; gap:5px; margin-bottom:4px; }
+.ts-item {
+  display:flex; align-items:center; gap:10px;
+  padding:7px 10px;
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:6px; cursor:pointer;
+  transition:border-color 0.2s, background 0.2s;
+  user-select:none; -webkit-tap-highlight-color:transparent;
+}
+.ts-item:hover { border-color:var(--cyan); }
+.ts-label {
+  flex:1; font-size:0.65rem; color:var(--text2);
+  letter-spacing:0.08em; text-transform:uppercase;
+}
+.ts-track {
+  width:44px; height:24px;
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:12px; position:relative; flex-shrink:0;
+  transition:background 0.25s, border-color 0.25s;
+}
+.ts-track .ts-thumb {
+  width:18px; height:18px;
+  background:#555; border-radius:50%;
+  position:absolute; top:2px; left:2px;
+  transition:left 0.2s, background 0.2s, box-shadow 0.2s;
+}
+.ts-track.on  { background:rgba(0,200,255,0.2); border-color:var(--cyan); }
+.ts-track.on  .ts-thumb { left:22px; background:var(--cyan); box-shadow:0 0 7px rgba(0,200,255,0.6); }
+.ts-track.open { background:rgba(0,255,136,0.2); border-color:var(--green); }
+.ts-track.open .ts-thumb { left:22px; background:var(--green); box-shadow:0 0 7px rgba(0,255,136,0.6); }
+.ts-val {
+  font-family:var(--font-mono); font-size:0.68rem; font-weight:700;
+  color:var(--text2); min-width:28px; text-align:right;
+}
+.ts-val.ts-val-on   { color:var(--cyan); }
+.ts-val.ts-val-open { color:var(--green); }
+
 /* ── 뮤직 플레이어 ── */
 .music-player {
   margin-top:10px;
@@ -845,12 +883,72 @@ header {
 }
 .target-temp-ctrl .tc-input:focus { border-color:var(--yellow); }
 .target-temp-ctrl .tc-apply {
-  background:var(--cyan); color:#000;
-  border:none; border-radius:4px; padding:4px 10px;
-  font-family:var(--font-main); font-weight:700; font-size:0.78rem;
+  background:rgba(0,200,255,0.12); color:var(--cyan);
+  border:1px solid var(--cyan); border-radius:6px; padding:4px 10px;
+  font-family:var(--font-mono); font-weight:700; font-size:0.75rem;
   cursor:pointer; transition:all 0.15s; white-space:nowrap;
+  letter-spacing:0.05em;
 }
-.target-temp-ctrl .tc-apply:hover { background:var(--cyan2); }
+.target-temp-ctrl .tc-apply:hover:not(:disabled) {
+  background:rgba(0,200,255,0.25);
+  box-shadow:0 0 8px rgba(0,200,255,0.3);
+}
+.target-temp-ctrl .tc-apply:disabled {
+  opacity:0.3; cursor:not-allowed; pointer-events:none;
+}
+
+/* ── 욕실 이중 온도 디스플레이 ── */
+.btd-row {
+  display:flex; gap:8px; margin-top:8px;
+}
+.btd-panel {
+  flex:1; background:#000; border:1px solid rgba(255,180,0,0.2);
+  border-radius:6px; padding:8px 6px; text-align:center;
+  transition: background 0.4s, border-color 0.4s;
+}
+.btd-panel.heating-active {
+  background: rgba(255, 80, 100, 0.10);
+  border-color: rgba(255, 100, 120, 0.45);
+}
+.btd-label {
+  font-size:0.55rem; color:rgba(255,180,0,0.45);
+  letter-spacing:0.1em; margin-bottom:4px; text-transform:uppercase;
+}
+.btd-value {
+  font-family:var(--font-mono); font-size:1.45rem; font-weight:700;
+  color:var(--yellow); letter-spacing:0.12em;
+  text-shadow:0 0 8px rgba(255,180,0,0.65);
+}
+.btd-value.btd-on {
+  color:var(--cyan);
+  text-shadow:0 0 10px rgba(0,200,255,0.7);
+}
+.btd-value.btd-off {
+  color:#444; text-shadow:none;
+  font-size:0.82rem; letter-spacing:0.04em;
+}
+.btd-unit {
+  font-size:0.65rem; color:rgba(255,180,0,0.4); margin-top:2px;
+}
+
+/* 욕실: 희망온도 + 난방 가로 배치 */
+.bathroom-ctrl-row {
+  display:flex; gap:8px; margin-top:6px; align-items:stretch;
+}
+.bathroom-ctrl-row .target-temp-wrap { margin-top:0; flex:1; }
+.heating-ctrl {
+  display:flex; align-items:stretch; min-width:80px;
+}
+.heating-toggle-btn {
+  flex:1; min-width:unset; font-size:0.82rem; padding:0 6px;
+}
+.heating-toggle-btn.active-red {
+  background:rgba(255,64,96,0.15);
+  border-color:var(--red); color:var(--red);
+}
+.tc-adj:disabled {
+  opacity:0.3; cursor:not-allowed; pointer-events:none;
+}
 
 /* ══════════════════════════════════════════
    모바일 반응형 (768px 이하)
@@ -861,13 +959,17 @@ header {
   header { padding:12px 16px; }
   .logo-text { font-size:1rem; }
 
-  /* 레이아웃: 1열 세로 스택 */
+  /* 레이아웃: flex column으로 전환 (모바일 순서 제어) */
   .layout {
-    grid-template-columns:1fr;
-    grid-template-rows:auto;
+    display:flex;
+    flex-direction:column;
     padding:12px 12px 80px;
     gap:12px;
   }
+  /* 모바일 순서: 음성 → 지도/로그 → 디바이스 */
+  .voice-panel     { order:1; }
+  .side-panel      { order:2; }
+  .devices-section { order:3; }
 
   /* 음성 패널: 세로로 */
   .voice-panel {
@@ -904,10 +1006,47 @@ header {
   .target-temp-ctrl .tc-input { font-size:1.1rem; }
   .target-temp-ctrl .tc-apply { padding:6px 14px; font-size:0.85rem; }
 
-  /* 사이드 패널: 아래로 */
-  .side-panel { flex-direction:column; }
-  .chart-wrap { height:140px; }
-  .log-list   { max-height:200px; }
+  /* 사이드 패널: 2열 고정 (left: house map, right: command log) */
+  .side-panel {
+    flex-direction:row;
+    align-items:stretch;
+    position:sticky;
+    top:0;
+    z-index:50;
+    background:var(--bg0,#050810);
+    border-bottom:1px solid var(--border);
+    box-shadow:0 4px 20px rgba(0,0,0,0.6);
+    margin:0 -12px;
+    padding:6px 12px;
+    gap:8px;
+  }
+  /* sticky 활성 시 cyan 강조 */
+  .side-panel.is-sticky {
+    border-bottom-color:var(--cyan);
+    box-shadow:0 4px 24px rgba(0,200,255,0.15);
+  }
+  /* DB LOG 버튼·HOUSE MAP 라벨: 모바일 sticky에서 숨김 */
+  .side-panel .dblog-search-btn { display:none; }
+  .side-panel > .section-label  { display:none; }
+  /* 좌측: house map */
+  .side-panel .chart-panel {
+    flex:1; min-width:0;
+    padding:0;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+  /* canvas: 고정 높이, 비율 유지 */
+  #houseCanvas {
+    height:150px;
+    width:100%;
+  }
+  /* 우측: command log */
+  .side-panel .log-panel {
+    flex:1; min-width:0;
+    max-height:160px;
+    overflow:hidden;
+  }
+  .log-list { max-height:110px; }
 
   /* 하단 상태바 */
   .status-bar { gap:12px; padding:8px 14px; font-size:0.6rem; }
@@ -1301,21 +1440,17 @@ header {
           <div class="device-name">차고</div>
           <div class="device-badge" id="badge-garage">OFFLINE</div>
         </div>
-        <div class="ctrl-row-3">
-          <div class="status-badge off" id="status-garage-led">
-            <span class="status-label">전등</span>
-            <span class="status-val" id="val-garage-led">OFF</span>
-          </div>
-          <button class="ctrl-btn" onclick="sendLed('garage',2,'on')">전등 켜기</button>
-          <button class="ctrl-btn" onclick="sendLed('garage',2,'off')">전등 끄기</button>
-        </div>
-        <div class="ctrl-row-3">
-          <div class="status-badge closed" id="status-garage-door">
-            <span class="status-label">차고문</span>
-            <span class="status-val" id="val-garage-door">닫힘</span>
-          </div>
-          <button class="ctrl-btn" onclick="sendDoor('garage',90)">차고문 열기</button>
-          <button class="ctrl-btn" onclick="sendDoor('garage',0)">차고문 닫기</button>
+        <div class="ts-row">
+          <label class="ts-item" onclick="toggleLed('garage')">
+            <span class="ts-label">전등</span>
+            <div class="ts-track" id="ts-garage-led"><div class="ts-thumb"></div></div>
+            <span class="ts-val" id="ts-val-garage-led">OFF</span>
+          </label>
+          <label class="ts-item" onclick="toggleDoor('garage',90)">
+            <span class="ts-label">차고문</span>
+            <div class="ts-track" id="ts-garage-door"><div class="ts-thumb"></div></div>
+            <span class="ts-val" id="ts-val-garage-door">닫힘</span>
+          </label>
         </div>
         <div class="servo-wrap">
           <div class="servo-label"><span>차고문 각도</span><span id="servo-garage-val">0°</span></div>
@@ -1332,13 +1467,12 @@ header {
           <div class="device-badge" id="badge-living">LOCAL</div>
         </div>
         <!-- 전등 제어 -->
-        <div class="ctrl-row-3" style="margin-bottom:10px;">
-          <div class="status-badge off" id="status-living-led">
-            <span class="status-label">전등</span>
-            <span class="status-val" id="val-living-led">OFF</span>
-          </div>
-          <button class="ctrl-btn" onclick="sendLed('living',2,'on')">전등 켜기</button>
-          <button class="ctrl-btn" onclick="sendLed('living',2,'off')">전등 끄기</button>
+        <div class="ts-row" style="margin-bottom:10px;">
+          <label class="ts-item" onclick="toggleLed('living')">
+            <span class="ts-label">전등</span>
+            <div class="ts-track" id="ts-living-led"><div class="ts-thumb"></div></div>
+            <span class="ts-val" id="ts-val-living-led">OFF</span>
+          </label>
         </div>
         <!-- 뮤직 플레이어 -->
         <div class="music-player">
@@ -1382,21 +1516,17 @@ header {
           <div class="device-name">침실</div>
           <div class="device-badge" id="badge-bedroom">OFFLINE</div>
         </div>
-        <div class="ctrl-row-3">
-          <div class="status-badge off" id="status-bedroom-led">
-            <span class="status-label">전등</span>
-            <span class="status-val" id="val-bedroom-led">OFF</span>
-          </div>
-          <button class="ctrl-btn" onclick="sendLed('bedroom',2,'on')">전등 켜기</button>
-          <button class="ctrl-btn" onclick="sendLed('bedroom',2,'off')">전등 끄기</button>
-        </div>
-        <div class="ctrl-row-3">
-          <div class="status-badge closed" id="status-bedroom-curtain">
-            <span class="status-label">커튼</span>
-            <span class="status-val" id="val-bedroom-curtain">닫힘</span>
-          </div>
-          <button class="ctrl-btn" onclick="sendCurtain(90)">커튼 열기</button>
-          <button class="ctrl-btn" onclick="sendCurtain(0)">커튼 닫기</button>
+        <div class="ts-row">
+          <label class="ts-item" onclick="toggleLed('bedroom')">
+            <span class="ts-label">전등</span>
+            <div class="ts-track" id="ts-bedroom-led"><div class="ts-thumb"></div></div>
+            <span class="ts-val" id="ts-val-bedroom-led">OFF</span>
+          </label>
+          <label class="ts-item" onclick="toggleCurtain()">
+            <span class="ts-label">커튼</span>
+            <div class="ts-track" id="ts-bedroom-curtain"><div class="ts-thumb"></div></div>
+            <span class="ts-val" id="ts-val-bedroom-curtain">닫힘</span>
+          </label>
         </div>
         <div class="servo-wrap">
           <div class="servo-label"><span>커튼 각도 &nbsp;(0°=닫힘 / 90°=열림)</span><span id="servo-bedroom-val">0°</span></div>
@@ -1412,21 +1542,17 @@ header {
           <div class="device-name">현관</div>
           <div class="device-badge" id="badge-entrance">OFFLINE</div>
         </div>
-        <div class="ctrl-row-3">
-          <div class="status-badge off" id="status-entrance-led">
-            <span class="status-label">전등</span>
-            <span class="status-val" id="val-entrance-led">OFF</span>
-          </div>
-          <button class="ctrl-btn" onclick="sendLed('entrance',2,'on')">전등 켜기</button>
-          <button class="ctrl-btn" onclick="sendLed('entrance',2,'off')">전등 끄기</button>
-        </div>
-        <div class="ctrl-row-3">
-          <div class="status-badge closed" id="status-entrance-door">
-            <span class="status-label">현관문</span>
-            <span class="status-val" id="val-entrance-door">닫힘</span>
-          </div>
-          <button class="ctrl-btn" onclick="sendDoor('entrance',90)">현관문 열기</button>
-          <button class="ctrl-btn" onclick="sendDoor('entrance',0)">현관문 닫기</button>
+        <div class="ts-row">
+          <label class="ts-item" onclick="toggleLed('entrance')">
+            <span class="ts-label">전등</span>
+            <div class="ts-track" id="ts-entrance-led"><div class="ts-thumb"></div></div>
+            <span class="ts-val" id="ts-val-entrance-led">OFF</span>
+          </label>
+          <label class="ts-item" onclick="toggleDoor('entrance',90)">
+            <span class="ts-label">현관문</span>
+            <div class="ts-track" id="ts-entrance-door"><div class="ts-thumb"></div></div>
+            <span class="ts-val" id="ts-val-entrance-door">닫힘</span>
+          </label>
         </div>
         <div class="servo-wrap">
           <div class="servo-label"><span>현관문 각도</span><span id="servo-entrance-val">0°</span></div>
@@ -1436,39 +1562,48 @@ header {
         </div>
       </div>
 
-      <!-- 거실 -->
+      <!-- 욕실 -->
       <div class="device-card" id="card-bathroom" style="--card-accent:#00C8FF; grid-column:1/-1;">
         <div class="device-header">
           <div class="device-name">욕실</div>
           <div class="device-badge" id="badge-bathroom">OFFLINE</div>
         </div>
-        <div class="ctrl-row-3">
-          <div class="status-badge off" id="status-bathroom-led">
-            <span class="status-label">전등</span>
-            <span class="status-val" id="val-bathroom-led">OFF</span>
-          </div>
-          <button class="ctrl-btn" onclick="sendLed('bathroom',2,'on')">전등 켜기</button>
-          <button class="ctrl-btn" onclick="sendLed('bathroom',2,'off')">전등 끄기</button>
+        <!-- 전등 + 난방 토글 -->
+        <div class="ts-row">
+          <label class="ts-item" onclick="toggleLed('bathroom')">
+            <span class="ts-label">전등</span>
+            <div class="ts-track" id="ts-bathroom-led"><div class="ts-thumb"></div></div>
+            <span class="ts-val" id="ts-val-bathroom-led">OFF</span>
+          </label>
+          <label class="ts-item" onclick="toggleHeating()">
+            <span class="ts-label">난방</span>
+            <div class="ts-track" id="ts-bathroom-heating"><div class="ts-thumb"></div></div>
+            <span class="ts-val" id="ts-val-bathroom-heating">OFF</span>
+          </label>
         </div>
-        <div class="target-temp-wrap">
-          <span class="target-temp-label">희망 온도 설정
-            <span id="bathroom-temp-set-badge" style="display:none; margin-left:8px; padding:2px 8px; border-radius:10px; background:rgba(0,200,255,0.15); border:1px solid var(--cyan); color:var(--cyan); font-size:0.8rem; font-family:var(--font-mono);">설정 --°C</span>
-          </span>
+        <!-- 온도 2단 디스플레이 -->
+        <div class="btd-row">
+          <div class="btd-panel">
+            <div class="btd-label">현재 온도</div>
+            <div class="btd-value" id="temp-bathroom">--.-</div>
+            <div class="btd-unit">°C</div>
+          </div>
+          <div class="btd-panel" id="btd-panel-target">
+            <div class="btd-label">희망 온도</div>
+            <div class="btd-value btd-off" id="btd-target-val">난방 OFF</div>
+            <div class="btd-unit" id="btd-target-unit"></div>
+          </div>
+        </div>
+        <!-- 희망온도 설정 -->
+        <div class="target-temp-wrap" style="margin-top:6px;">
+          <span class="target-temp-label">희망 온도 설정</span>
           <div class="target-temp-ctrl">
-            <button class="tc-adj" onclick="adjustTarget('bathroom',-1)">−</button>
-            <input class="tc-input" id="target-bathroom" type="number" value="24" min="10" max="40" step="0.5"
-              onchange="applyTarget('bathroom')">
-            <button class="tc-adj" onclick="adjustTarget('bathroom',1)">+</button>
+            <button class="tc-adj" id="tc-adj-minus" onclick="adjustTarget('bathroom',-0.5)" disabled>−</button>
+            <input class="tc-input" id="target-bathroom" type="number" value="20" min="10" max="40" step="0.5">
+            <button class="tc-adj" id="tc-adj-plus" onclick="adjustTarget('bathroom',0.5)" disabled>+</button>
             <span class="tc-unit" style="margin:0 2px;">°C</span>
-            <button class="tc-apply" onclick="applyTarget('bathroom')">적용</button>
+            <button class="tc-apply" id="tc-apply-bathroom" onclick="applyTarget('bathroom')" disabled>설정</button>
           </div>
-        </div>
-        <div class="seg7-display" id="seg7-display">- - . -</div>
-        <div class="seg7-mode-btns">
-          <button class="seg7-mode-btn active" id="seg7-temp"
-            onclick="setSeg7Mode('temp')">온도</button>
-          <button class="seg7-mode-btn" id="seg7-off"
-            onclick="sendCmd({cmd:'seg7',pin_clk:22,pin_dio:23,mode:'off',device_id:'esp32_home',room:'bathroom'})">OFF</button>
         </div>
       </div>
 
@@ -1885,7 +2020,7 @@ function handleServerMsg(data) {
     updateDeviceState(data.device_id, data.state || {});
   }
   else if (type === 'sensor_data') {
-    updateSensor(data.device_id, data.temp, data.humidity);
+    updateSensor(data.device_id, data.temp, data.humidity, data.room);
   }
   else if (type === 'cmd_result') {
     const isOk   = data.status === 'ok';
@@ -1932,6 +2067,13 @@ function handleServerMsg(data) {
   }
   else if (type === 'music_control') {
     handleMusicControl(data.action, data.value);
+  }
+  else if (type === 'heating_state') {
+    // 다른 클라이언트(모바일 등)에서 난방 상태가 변경됐을 때 UI 동기화
+    if (data.room === 'bathroom') {
+      updateHeatingUI(data.state === 'on');
+      log(`🔥 욕실 난방 상태 동기화: ${data.state === 'on' ? 'ON' : 'OFF'}`, 'info');
+    }
   }
   else if (type === 'pir_alert') {
     handlePirAlert(data);
@@ -2047,15 +2189,19 @@ function updateDeviceState(device_id, state) {
   }
 }
 
-function updateSensor(device_id, temp, humidity) {
-  // v2: esp32_home은 room 필드로 구분 (sensor 데이터에 room 포함)
-  const room = (device_id === 'esp32_home') ? (arguments[3] || null) : null;
-
-  if (device_id === 'esp32_home' && temp != null) {
-    // esp32_home sensor는 room 필드 없이 전체 반영 (현재 미사용)
+function updateSensor(device_id, temp, humidity, room) {
+  // esp32_home + room='bathroom' → 욕실 DHT11 현재온도 업데이트
+  if (device_id === 'esp32_home' && room === 'bathroom') {
+    if (temp != null) {
+      document.getElementById('temp-bathroom').textContent = temp.toFixed(1);
+      _currentTemp = temp;
+      updateHeatingActiveStyle();
+    }
   }
   if (device_id === 'esp32_bathroom' && temp != null) {
     document.getElementById('temp-bathroom').textContent = temp.toFixed(1);
+    _currentTemp = temp;
+    updateHeatingActiveStyle();
   }
   if (device_id === 'esp32_bedroom') {
     if (temp != null)     document.getElementById('temp-bedroom').textContent = temp.toFixed(1);
@@ -2132,22 +2278,21 @@ function sendLed(key, pin, state) {
   updateLedStatus(key, state);
 }
 
-function updateLedStatus(key, state) {
-  const badge = document.getElementById(`status-${key}-led`);
-  const val   = document.getElementById(`val-${key}-led`);
-  if (!badge || !val) return;
-  if (state === 'on') {
-    badge.className = 'status-badge on';
-    val.textContent = 'ON';
-  } else {
-    badge.className = 'status-badge off';
-    val.textContent = 'OFF';
-  }
-  // 3D 하우스 동기화
-  houseSetLed(key, state === 'on');
+function toggleLed(room) {
+  const isOn = (house[room] || {}).led;
+  sendLed(room, null, isOn ? 'off' : 'on');
 }
 
-// ── 차고문 제어 + 상태 뱃지 업데이트 ────────────────────────────────
+function updateLedStatus(key, state) {
+  const isOn  = state === 'on';
+  const track = document.getElementById(`ts-${key}-led`);
+  const val   = document.getElementById(`ts-val-${key}-led`);
+  if (track) track.className = isOn ? 'ts-track on' : 'ts-track';
+  if (val)   { val.textContent = isOn ? 'ON' : 'OFF'; val.className = isOn ? 'ts-val ts-val-on' : 'ts-val'; }
+  houseSetLed(key, isOn);
+}
+
+// ── 차고문/현관문 제어 + 상태 뱃지 업데이트 ─────────────────────────
 function sendDoor(key, angle) {
   // v2: esp32_home + room
   sendCmd({ cmd:'servo', room: key, angle, device_id: 'esp32_home' });
@@ -2159,19 +2304,18 @@ function sendDoor(key, angle) {
   updateDoorStatus(key, angle);
 }
 
+function toggleDoor(room, openAngle) {
+  const isOpen = (house[room] || {}).door;
+  sendDoor(room, isOpen ? 0 : openAngle);
+}
+
 function updateDoorStatus(key, angle) {
-  const badge = document.getElementById(`status-${key}-door`);
-  const val   = document.getElementById(`val-${key}-door`);
-  if (!badge || !val) return;
-  if (angle >= 45) {
-    badge.className = 'status-badge open';
-    val.textContent = '열림';
-  } else {
-    badge.className = 'status-badge closed';
-    val.textContent = '닫힘';
-  }
-  // 3D 하우스 동기화
-  houseSetDoor(key, angle >= 45);
+  const isOpen = angle >= 45;
+  const track  = document.getElementById(`ts-${key}-door`);
+  const val    = document.getElementById(`ts-val-${key}-door`);
+  if (track) track.className = isOpen ? 'ts-track open' : 'ts-track';
+  if (val)   { val.textContent = isOpen ? '열림' : '닫힘'; val.className = isOpen ? 'ts-val ts-val-open' : 'ts-val'; }
+  houseSetDoor(key, isOpen);
 }
 
 // ── 커튼 제어 + 상태 뱃지 업데이트 ─────────────────────────────────
@@ -2185,19 +2329,18 @@ function sendCurtain(angle) {
   updateCurtainStatus(angle);
 }
 
+function toggleCurtain() {
+  const isOpen = (house.bedroom || {}).curtain;
+  sendCurtain(isOpen ? 0 : 90);
+}
+
 function updateCurtainStatus(angle) {
-  const badge = document.getElementById('status-bedroom-curtain');
-  const val   = document.getElementById('val-bedroom-curtain');
-  if (!badge || !val) return;
-  if (angle >= 45) {
-    badge.className = 'status-badge open';
-    val.textContent = '열림';
-  } else {
-    badge.className = 'status-badge closed';
-    val.textContent = '닫힘';
-  }
-  // 3D 하우스 동기화
-  houseSetCurtain(angle >= 45);
+  const isOpen = angle >= 45;
+  const track  = document.getElementById('ts-bedroom-curtain');
+  const val    = document.getElementById('ts-val-bedroom-curtain');
+  if (track) track.className = isOpen ? 'ts-track open' : 'ts-track';
+  if (val)   { val.textContent = isOpen ? '열림' : '닫힘'; val.className = isOpen ? 'ts-val ts-val-open' : 'ts-val'; }
+  houseSetCurtain(isOpen);
 }
 
 // 음성 텍스트 전송
@@ -2334,21 +2477,47 @@ document.getElementById('micBtn').onclick = async () => {
 function adjustTarget(room, delta) {
   const input = document.getElementById(`target-${room}`);
   if (!input) return;
-  const val = parseFloat(input.value) || 24;
-  input.value = Math.min(40, Math.max(10, val + delta)).toFixed(1);
+  const val    = parseFloat(input.value) || 20;
+  const newVal = Math.min(40, Math.max(10, val + delta));
+  input.value  = newVal.toFixed(1);
+
+  if (room === 'bathroom') {
+    // 희망온도 디스플레이 즉시 동기화 (난방이 켜져 있을 때만)
+    if (_heatingOn) {
+      const targetVal  = document.getElementById('btd-target-val');
+      const targetUnit = document.getElementById('btd-target-unit');
+      if (targetVal) { targetVal.textContent = newVal.toFixed(1); targetVal.className = 'btd-value btd-on'; }
+      if (targetUnit) targetUnit.textContent = '°C';
+    }
+    // 7세그먼트: 희망온도 3초 표시
+    sendSeg7TargetTemp(newVal);
+    updateHeatingActiveStyle();
+  }
 }
 
 function applyTarget(room) {
   const input = document.getElementById(`target-${room}`);
   if (!input) return;
-  const target = parseFloat(input.value);
+  // 범위 클램프 후 소수점 1자리로 정규화
+  let target = parseFloat(input.value);
   if (isNaN(target)) return;
+  target = Math.min(40, Math.max(10, target));
+  input.value = target.toFixed(1);
 
   if (room === 'bathroom') {
     setBathroomTempDisplay(target);
     sendCmd({cmd:'set_bathroom_temp', device_id:'esp32_home', value:target});
+    // 난방이 켜져 있으면 희망온도 디스플레이 즉시 갱신 + 7seg 전송
+    if (_heatingOn) {
+      const targetVal  = document.getElementById('btd-target-val');
+      const targetUnit = document.getElementById('btd-target-unit');
+      if (targetVal) { targetVal.textContent = target.toFixed(1); targetVal.className = 'btd-value btd-on'; }
+      if (targetUnit) targetUnit.textContent = '°C';
+      sendSeg7TargetTemp(target);
+    }
   }
-  log(`🌡️ 욕실 희망온도 → ${target}°C`, 'info');
+  log(`🌡️ 욕실 희망온도 설정 → ${target.toFixed(1)}°C`, 'info');
+  updateHeatingActiveStyle();
 }
 
 // ── 욕실 희망온도 웹앱 표시 (음성/버튼 공통) ───────────────────────
@@ -2360,28 +2529,81 @@ function setBathroomTempDisplay(value) {
   const input = document.getElementById('target-bathroom');
   if (input) input.value = val.toFixed(1);
 
-  // 7세그먼트 디스플레이 업데이트
-  const seg = document.getElementById('seg7-display');
-  if (seg) {
-    seg.textContent = val.toFixed(1) + '°C';
-    seg.classList.add('seg7-active');
-    clearTimeout(window._seg7Timer);
-    window._seg7Timer = setTimeout(() => seg.classList.remove('seg7-active'), 2000);
+
+  log(`🌡️ 욕실 희망온도 → ${val.toFixed(1)}°C`, 'ok');
+}
+
+// ════════════════════════════════════════════
+// 욕실 난방 제어
+// ════════════════════════════════════════════
+let _heatingOn   = false;
+let _currentTemp = NaN;   // 욕실 현재온도 (DHT11 수신값)
+
+// 난방 작동 여부 = 난방 ON + 희망온도 > 현재온도
+function updateHeatingActiveStyle() {
+  const panel  = document.getElementById('btd-panel-target');
+  if (!panel) return;
+  const target  = parseFloat(document.getElementById('target-bathroom')?.value) || 20;
+  const active  = _heatingOn && !isNaN(_currentTemp) && target > _currentTemp;
+  panel.classList.toggle('heating-active', active);
+}
+
+// 7세그먼트에 희망온도 전송 (ESP32에서 3초 후 현재온도로 자동 복귀)
+function sendSeg7TargetTemp(targetVal) {
+  sendCmd({
+    cmd: 'seg7',
+    device_id: 'esp32_home',
+    room: 'bathroom',
+    mode: 'target_temp',
+    value: parseFloat(targetVal),
+  });
+}
+
+function toggleHeating() {
+  _heatingOn = !_heatingOn;
+  sendCmd({cmd:'heating', device_id:'esp32_home', room:'bathroom', state: _heatingOn ? 'on' : 'off'});
+  updateHeatingUI(_heatingOn);
+  // 난방 ON: 7세그먼트에 희망온도 3초 표시
+  if (_heatingOn) {
+    const t = parseFloat(document.getElementById('target-bathroom')?.value) || 20;
+    sendSeg7TargetTemp(t);
   }
+  log(`🔥 욕실 난방 ${_heatingOn ? '켜기' : '끄기'}`, _heatingOn ? 'ok' : 'info');
+}
 
-  // 설정 온도 뱃지 업데이트
-  const badge = document.getElementById('bathroom-temp-set-badge');
-  if (badge) {
-    badge.textContent = `설정 ${val.toFixed(1)}°C`;
-    badge.style.display = 'inline-block';
+function updateHeatingUI(isOn) {
+  _heatingOn = isOn;
+
+  // 토글 스위치 상태
+  const track = document.getElementById('ts-bathroom-heating');
+  const val   = document.getElementById('ts-val-bathroom-heating');
+  if (track) track.className = isOn ? 'ts-track on' : 'ts-track';
+  if (val)   { val.textContent = isOn ? 'ON' : 'OFF'; val.className = isOn ? 'ts-val ts-val-on' : 'ts-val'; }
+
+  // +/- · 설정 버튼 활성화 여부
+  const adjMinus  = document.getElementById('tc-adj-minus');
+  const adjPlus   = document.getElementById('tc-adj-plus');
+  const applyBtn  = document.getElementById('tc-apply-bathroom');
+  if (adjMinus) adjMinus.disabled = !isOn;
+  if (adjPlus)  adjPlus.disabled  = !isOn;
+  if (applyBtn) applyBtn.disabled = !isOn;
+
+  // 희망온도 디스플레이
+  const targetVal  = document.getElementById('btd-target-val');
+  const targetUnit = document.getElementById('btd-target-unit');
+  if (targetVal) {
+    if (isOn) {
+      const t = parseFloat(document.getElementById('target-bathroom')?.value) || 20;
+      targetVal.textContent = t.toFixed(1);
+      targetVal.className   = 'btd-value btd-on';
+      if (targetUnit) targetUnit.textContent = '°C';
+    } else {
+      targetVal.textContent = '난방 OFF';
+      targetVal.className   = 'btd-value btd-off';
+      if (targetUnit) targetUnit.textContent = '';
+    }
   }
-
-  // seg7 모드 버튼 활성화
-  document.querySelectorAll('.seg7-mode-btn').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById('seg7-temp');
-  if (btn) btn.classList.add('active');
-
-  log(`🌡️ 욕실 희망온도 → ${val.toFixed(1)}°C (7세그먼트 표시)`, 'ok');
+  updateHeatingActiveStyle();
 }
 
 // ════════════════════════════════════════════
@@ -2413,7 +2635,7 @@ const house = {
   living:   { led: false },
   bedroom:  { led: false, curtain: false },
   entrance: { led: false, door: false },
-  bathroom: { led: false },
+  bathroom: { led: false, heating: false },
 };
 
 // 음악 파장 상태
@@ -3473,6 +3695,21 @@ window.onload = () => {
   if (savedMode && PIR_MODE_CONFIG[savedMode]) {
     _updatePirUI(savedMode);
     log('🔄 PIR 모드 복원 (로컬): ' + savedMode, 'info');
+  }
+
+  // 모바일: 사이드 패널이 실제로 sticky 상태가 됐을 때 .is-sticky 클래스 토글
+  if (window.matchMedia('(max-width:768px)').matches) {
+    const sidePanel = document.querySelector('.side-panel');
+    if (sidePanel) {
+      // sentinel: side-panel 바로 앞에 삽입해 교차 감지
+      const sentinel = document.createElement('div');
+      sentinel.style.cssText = 'height:1px;pointer-events:none;';
+      sidePanel.parentNode.insertBefore(sentinel, sidePanel);
+      new IntersectionObserver(
+        ([entry]) => sidePanel.classList.toggle('is-sticky', !entry.isIntersecting),
+        { threshold: 0 }
+      ).observe(sentinel);
+    }
   }
 };
 

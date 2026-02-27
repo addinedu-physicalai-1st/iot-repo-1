@@ -141,12 +141,12 @@ class CmdQuery:
 class CmdSeg7:
     pin_clk: int
     pin_dio: int
-    mode: Literal["temp", "humidity", "number", "off"]
+    mode: Literal["temp", "humidity", "number", "off", "current_temp", "target_temp"]
     value: Optional[float] = None
     cmd: str = CMD_SEG7
 
     def validate(self) -> bool:
-        if self.mode not in ("temp", "humidity", "number", "off"):
+        if self.mode not in ("temp", "humidity", "number", "off", "current_temp", "target_temp"):
             return False
         if self.mode != "off" and self.value is None:
             return False
@@ -214,6 +214,7 @@ class WsSensorData:
     type: str = WS_SENSOR_DATA
     temp: Optional[float] = None
     humidity: Optional[float] = None
+    room: Optional[str] = None
 
 
 @dataclass
@@ -320,8 +321,8 @@ def validate_command(data: dict) -> tuple[bool, str]:
         pass  # room 기반 자동 처리
 
     elif cmd == CMD_SEG7:
-        if data.get("mode") not in ("temp", "humidity", "number", "off"):
-            return False, "seg7: mode must be 'temp'|'humidity'|'number'|'off'"
+        if data.get("mode") not in ("temp", "humidity", "number", "off", "current_temp", "target_temp"):
+            return False, "seg7: mode must be 'temp'|'humidity'|'number'|'off'|'current_temp'|'target_temp'"
         if data.get("mode") != "off" and data.get("value") is None:
             return False, "seg7: value required when mode != 'off'"
 
@@ -347,8 +348,8 @@ def cmd_query(sensor: str = "seg7") -> bytes:
 def ws_cmd_result(status: str, msg: str) -> str:
     return to_json_str(WsCmdResult(status=status, msg=msg))
 
-def ws_sensor_data(device_id: str, temp: float = None, humidity: float = None) -> str:
-    return to_json_str(WsSensorData(device_id=device_id, temp=temp, humidity=humidity))
+def ws_sensor_data(device_id: str, temp: float = None, humidity: float = None, room: str = None) -> str:
+    return to_json_str(WsSensorData(device_id=device_id, temp=temp, humidity=humidity, room=room))
 
 def ws_device_update(device_id: str, state: dict) -> str:
     return to_json_str(WsDeviceUpdate(device_id=device_id, state=state))

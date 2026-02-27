@@ -199,6 +199,10 @@ class CommandRouter:
         if data.get("cmd") == "set_bathroom_temp":
             return await self._execute_set_bathroom_temp(data)
 
+        # cmd="heating" → 욕실 난방 ON/OFF (UI 상태 동기화 + DB 기록)
+        if data.get("cmd") == "heating":
+            return await self._execute_heating(data)
+
         # cmd="query_bathroom_temp" → 욕실 현재온도 조회 (센서 없음 → 희망온도 안내)
         if data.get("cmd") == "query_bathroom_temp":
             return await self._execute_query_bathroom_temp(data)
@@ -626,6 +630,45 @@ class CommandRouter:
                 "status": "ok",
                 "msg": msg,
                 "tts_response": tts,
+            }, ensure_ascii=False)
+
+        return ws_cmd_result("ok", msg)
+
+    async def _execute_heating(self, data: dict) -> str:
+        """
+        욕실 난방 ON/OFF 처리
+        - 상태를 WS 브로드캐스트로 모든 클라이언트에 동기화
+        - DB 이벤트 기록
+        - ESP32 하드웨어 연동이 필요하면 여기에 TCP 명령 추가
+        """
+        import json as _j
+
+        state = data.get("state", "off").lower()
+        is_on = state == "on"
+
+        msg = f"욕실 난방 {'켜기' if is_on else '끄기'}"
+        logger.info(f"[Router] {msg}")
+
+        # WS 브로드캐스트 → 다른 클라이언트(모바일 등) 상태 동기화
+        ws_payload = _j.dumps({
+            "type":  "heating_state",
+            "room":  "bathroom",
+            "state": state,
+        }, ensure_ascii=False)
+        if self._tcp.ws_broadcast:
+            await self._tcp.ws_broadcast(ws_payload)
+
+        # DB 로그
+        if self._db:
+            self._db.log("heating", "command_router", msg,
+                         device_id="esp32_home", room="bathroom",
+                         detail={"state": state})
+
+        tts = data.get("tts_response", "")
+        if tts:
+            return _j.dumps({
+                "type": "cmd_result", "status": "ok",
+                "msg": msg, "tts_response": tts,
             }, ensure_ascii=False)
 
         return ws_cmd_result("ok", msg)

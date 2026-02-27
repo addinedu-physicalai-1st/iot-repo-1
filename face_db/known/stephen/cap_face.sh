@@ -1,7 +1,7 @@
 python3 -c "
 import cv2, time
 cam = cv2.VideoCapture(0)
-for i in range(5):
+for i in range(15):
     time.sleep(1)
     ret, frame = cam.read()
     if ret:
