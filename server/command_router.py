@@ -366,10 +366,6 @@ class CommandRouter:
                     pin = ROOM_LED_PIN.get(room)
                     if pin is not None:
                         client.state[f"led_{pin}"] = 1
-            import asyncio
-            await asyncio.sleep(0.4)
-            await self._handle_music({"cmd": "music", "action": "play"})
-            logger.info("[Router] all_on: 음악 play 전송")
 
         else:
             return ws_cmd_result("fail", f"all 브로드캐스트: 지원하지 않는 cmd={cmd}")
@@ -605,6 +601,16 @@ class CommandRouter:
 
         logger.info(f"[Router] SEG7 전송 완료: {value:.1f}°C")
 
+        # 희망온도 설정 시 난방 자동 ON → 웹앱에 heating_state 브로드캐스트
+        heating_payload = _j.dumps({
+            "type":  "heating_state",
+            "room":  "bathroom",
+            "state": "on",
+        }, ensure_ascii=False)
+        if self._tcp.ws_broadcast:
+            await self._tcp.ws_broadcast(heating_payload)
+        logger.info("[Router] 온도 설정 → 난방 자동 ON 브로드캐스트")
+
         # 웹앱 동기화용 브로드캐스트 (ESP32 연결 여부 무관)
         ws_payload = _j.dumps({
             "type": "bathroom_temp_set",
@@ -614,14 +620,14 @@ class CommandRouter:
         if self._tcp.ws_broadcast:
             await self._tcp.ws_broadcast(ws_payload)
 
-        msg = f"욕실 희망온도 {value}°C 설정 완료"
+        msg = f"욕실 난방 ON + 희망온도 {value}°C 설정 완료"
         logger.info(f"[Router] {msg}")
 
         # DB 로그 (SR-3.1)
         if self._db:
             self._db.log("bathroom_temp", "command_router", msg,
                          device_id=DEVICE_HOME1, room="bathroom",
-                         detail={"action": "set", "value": value})
+                         detail={"action": "set_and_heat_on", "value": value})
 
         if tts:
             return _j.dumps({
@@ -952,6 +958,12 @@ class CommandRouter:
           - LLM이 {"cmd": None, "tts_response": "..."} 반환 시
             execute() 우회 → tts_response만 담아 반환
         """
+        # STT 오인식 교정 (LLM/fallback 공통 적용)
+        normalized = self._normalize_stt(text)
+        if normalized != text:
+            logger.info(f"[Router] STT 정규화: '{text}' → '{normalized}'")
+        text = normalized
+
         if self._llm is None:
             # LLM 없을 때 키워드 기반 간단 파싱 (fallback)
             logger.info(f"[Router] LLM 없음, 키워드 fallback: {text}")
@@ -1062,12 +1074,61 @@ class CommandRouter:
 
         return None
 
+    def _normalize_stt(self, text: str) -> str:
+        """
+        Whisper STT 한국어 오인식 교정
+        - 음성과 발음이 유사하지만 다르게 인식되는 단어를 올바른 형태로 치환
+        - LLM/fallback 파싱 전에 공통 적용
+        """
+        import re as _re
+
+        # ── 난방 관련 오인식 ──────────────────────────────────────────
+        # 남방/냄방/난빵/냄빵/남빵/란방/남바/남빵 → 난방
+        text = _re.sub(r'[남냄난란][방빵바]', '난방', text)
+
+        # ── 보일러 오인식 ─────────────────────────────────────────────
+        # 뵈일러/보이러/보일로/뵈일로 → 보일러
+        text = _re.sub(r'뵈일[러로]', '보일러', text)
+        text = _re.sub(r'보이[러를르]', '보일러', text)
+        text = _re.sub(r'보일[로루]', '보일러', text)
+
+        # ── 켜줘/켜 오인식 ───────────────────────────────────────────
+        # 켜줘요/케줘/켜주 → 켜줘
+        text = text.replace('켜줘요', '켜줘')
+        text = text.replace('케줘', '켜줘')
+        text = text.replace('켜주세요', '켜줘')
+        text = text.replace('꺼주세요', '꺼줘')
+        text = text.replace('꺼줘요', '꺼줘')
+
+        # ── 커튼 오인식 ──────────────────────────────────────────────
+        # 거튼/꺼튼/컨튼 → 커튼
+        text = _re.sub(r'[거꺼컨][튼튼]', '커튼', text)
+
+        # ── 침실 오인식 ──────────────────────────────────────────────
+        text = text.replace('침실', '침실')  # placeholder for future
+        text = text.replace('칩실', '침실')
+        text = text.replace('침씰', '침실')
+
+        # ── 욕실 오인식 ──────────────────────────────────────────────
+        text = text.replace('욕씰', '욕실')
+        text = text.replace('옥실', '욕실')
+
+        # ── 거실 오인식 ──────────────────────────────────────────────
+        text = text.replace('거씰', '거실')
+        text = text.replace('걱실', '거실')
+
+        # ── 현관 오인식 ──────────────────────────────────────────────
+        text = text.replace('현간', '현관')
+        text = text.replace('현완', '현관')
+
+        return text
+
     def _simple_parse(self, text: str) -> Optional[dict]:
         """
         LLM 없을 때 키워드 기반 단순 파싱 (fallback)
         v2: device_id → esp32_home, room 필드 추가
         """
-        text = text.strip()
+        text = self._normalize_stt(text.strip())
 
         # room 결정
         room = None
@@ -1101,11 +1162,22 @@ class CommandRouter:
             r = room if (room and not is_all) else "all"
             return {"cmd": "status", "room": r, "target": target}
 
+        # ── 욕실 난방 (LED/전원 키워드보다 먼저 체크) ────────────────────
+        if any(k in text for k in ["난방 켜", "난방 틀어", "난방 시작", "보일러 켜", "보일러 틀어", "욕실 따뜻"]):
+            return {"cmd": "heating", "room": "bathroom", "state": "on",
+                    "tts_response": "욕실 난방을 켰어요."}
+        if any(k in text for k in ["난방 꺼", "난방 끄", "난방 정지", "보일러 꺼", "보일러 끄"]):
+            return {"cmd": "heating", "room": "bathroom", "state": "off",
+                    "tts_response": "욕실 난방을 껐어요."}
+
         if any(k in text for k in ["켜", "켜줘", "불 켜", "조명 켜"]):
             if is_all:
                 return {"cmd": "all_on", "device_id": "all"}
             if not room:
-                return {"cmd": CMD_LED, "state": "on", "device_id": "all"}
+                return {
+                    "cmd": None,
+                    "tts_response": "어떤 방의 불을 켜드릴까요? 거실, 침실, 욕실, 차고, 현관 중 말씀해주세요.",
+                }
             return {**base, "cmd": CMD_LED, "state": "on"}
 
         is_power_off = any(k in text for k in ["꺼", "꺼줘", "전원 꺼", "다 꺼", "모두 꺼", "전체 꺼"])

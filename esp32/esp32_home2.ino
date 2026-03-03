@@ -337,9 +337,13 @@ void handlePir() {
   bool motionDetected = (digitalRead(PIN_PIR) == HIGH);
   unsigned long now   = millis();
 
-  // LOW → HIGH 상승 엣지: 모드 무관하게 한 번만 출력
+  // LOW → HIGH 상승 엣지: 모드에 관계없이 서버에 기본 motion_detected 이벤트 전송
   if (motionDetected && !prevMotion) {
     Serial.println("[PIR] 감지가 되었다");
+    if (now - lastAlertTime > PIR_ALERT_COOLDOWN_MS) {
+      sendPirEvent("motion_detected", "rising_edge");
+      lastAlertTime = now;
+    }
   }
   prevMotion = motionDetected;
 
