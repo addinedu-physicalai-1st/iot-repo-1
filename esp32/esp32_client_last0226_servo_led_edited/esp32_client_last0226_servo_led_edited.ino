@@ -34,6 +34,7 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
+#include "config.h"          // WiFi/서버 민감정보 (config.h.example 참조)
 // #include <TM1637Display.h>  // 미사용
 
 
@@ -43,11 +44,8 @@
 
 
 
-#define WIFI_SSID      "addinedu_201class_2-2.4G"
-#define WIFI_PASSWORD  "201class2!"
-
+// WiFi/서버 설정은 config.h 에서 관리
 // ── TCP 서버 ──────────────────────────────────────────────────────
-#define SERVER_IP      "192.168.0.189"  // 서버 PC IP
 #define SERVER_PORT    9000
 
 // ── 디바이스 ID ───────────────────────────────────────────────────

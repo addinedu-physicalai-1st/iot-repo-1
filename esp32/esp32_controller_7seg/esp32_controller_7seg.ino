@@ -9,12 +9,10 @@
  *   - device_id = "esp32_home" 으로 통합 등록
  *   - JSON 명령의 "room" 필드로 공간 구분 → 해당 핀 제어
  *
- * 공간별 핀 배정:
- *   거실  (living)   : LED GPIO 2
- *   욕실  (bathroom) : LED GPIO 4  / 4-Digit 7Seg (직접 핀) / DHT11 GPIO 33
- *   침실  (bedroom)  : LED GPIO 5  / Servo GPIO 14
- *   차고  (garage)   : LED GPIO 12 / Servo GPIO 156
- *   현관  (entrance) : LED GPIO 13 / Servo GPIO 16
+ * 공간별 핀 배정 (활성):
+ *   욕실  (bathroom) : 4-Digit 7Seg (직접 핀) / DHT11 GPIO 33
+ *   침실  (bedroom)  : Servo GPIO 2  (커튼)
+ *   [LED 전체 비활성 — 주석처리됨]
  *
  * 의존 라이브러리 (Arduino Library Manager):
  *   - ArduinoJson     (6.x)
@@ -37,24 +35,21 @@
  #include <WiFi.h>
  #include <ArduinoJson.h>
  #include <ESP32Servo.h>
- 
- 
+ #include "config.h"          // WiFi/서버 민감정보 (config.h.example 참조)
+
+
  // ================================================================
  // Config — 여기만 수정
  // ================================================================
- 
- 
- 
- #define WIFI_SSID      "addinedu_201class_2-2.4G"
- #define WIFI_PASSWORD  "201class2!"
- 
+
+
+ // WiFi/서버 설정은 config.h 에서 관리
  // ── TCP 서버 ──────────────────────────────────────────────────────
- #define SERVER_IP      "192.168.0.189"  // 서버 PC IP
  #define SERVER_PORT    9000
  
 // ── 디바이스 ID ───────────────────────────────────────────────────
-#define DEVICE_ID      "esp32_home"
-#define CAPS_STR       "[\"led\",\"servo\",\"seg7\",\"dht11\"]"
+#define DEVICE_ID      "esp32_home1"
+#define CAPS_STR       "[\"servo\",\"seg7\",\"dht11\"]"  // led 비활성
 
 // ── 타이밍 ────────────────────────────────────────────────────────
 #define RECONNECT_DELAY_MS  3000
@@ -66,26 +61,26 @@
  // ================================================================
  
  // ── LED (공간별) ──────────────────────────────────────────────────
- #define PIN_LED_LIVING    2 // *
- #define PIN_LED_BATHROOM  32
- #define PIN_LED_BEDROOM   35
- #define PIN_LED_GARAGE    34
- #define PIN_LED_ENTRANCE  4  // ⚠️ PIN_A과 충돌 가능
+//  #define PIN_LED_LIVING    15
+//  #define PIN_LED_BATHROOM  32
+//  #define PIN_LED_BEDROOM   35
+//  #define PIN_LED_GARAGE    2
+//  #define PIN_LED_ENTRANCE  34
  
- // ── 서보 (공간별) ─────────────────────────────────────────────────
- #define PIN_SERVO_BEDROOM   5     // 커튼  // ⚠️ PIN_B과 충돌 가능
- #define PIN_SERVO_GARAGE    15   // 차고문  // *
- #define PIN_SERVO_ENTRANCE  16   // 현관문
+ // ── 서보 (침실 커튼만 사용) ──────────────────────────────────────
+ #define PIN_SERVO_BEDROOM   2     // 침실 커튼 서보
+//  #define PIN_SERVO_GARAGE    15   // 차고문  (미사용)
+//  #define PIN_SERVO_ENTRANCE  16   // 현관문  (미사용)
  
 // ── 4-Digit 7세그먼트 (욕실) - 직접 핀 제어 ──────────────────────────
 // 세그먼트 핀 (A-G)
-const int PIN_A = 4;   // ⚠️ PIN_LED_BATHROOM과 충돌 가능
-const int PIN_B = 5;   // ⚠️ PIN_LED_BEDROOM과 충돌 가능
-const int PIN_C = 18;
-const int PIN_D = 19;
-const int PIN_E = 21;
-const int PIN_F = 22;
-const int PIN_G = 23;
+#define PIN_A 4
+#define PIN_B 5
+#define PIN_C 18
+#define PIN_D 19
+#define PIN_E 21
+#define PIN_F 22
+#define PIN_G 23
 #define   PIN_DP 25    // 소수점(DP) 핀 — 3번째 자리(SEG3)의 DP 애노드 연결
 
 // 디지트 선택 핀 (공통 캐소드: LOW=선택, HIGH=OFF)
@@ -98,6 +93,21 @@ const int SEG4 = 26;  // 네 번째 자리 (오른쪽) — 소수 첫째 자리
 const int segPins[7] = {PIN_A, PIN_B, PIN_C, PIN_D, PIN_E, PIN_F, PIN_G};
 // 디지트 핀 배열
 const int digitPins[4] = {SEG1, SEG2, SEG3, SEG4};
+
+// ── DHT11 온습도 센서 (디지털) ────────────────────────────────────
+#define DHTPIN        33   // GPIO 33 — DHT11 DATA 핀 연결
+
+ // ── PIR 센서 ─────────────────────────────────────────────────────
+ #define PIN_PIR       27   // HC-SR501 OUT 핀 // *
+ 
+ // ── PIR 모드 정의 ─────────────────────────────────────────────────
+ #define PIR_MODE_OFF      0   // 비활성
+ #define PIR_MODE_PRESENCE 1   // 재실 감지 (정적 이상 감지)
+ #define PIR_MODE_GUARD    2   // 방범 모드 (외출 시 침입 감지)
+ 
+ // ── PIR 타이밍 설정 ───────────────────────────────────────────────
+ #define PIR_STATIC_TIMEOUT_MS   (4UL * 60 * 60 * 1000)  // 재실: 4시간 무움직임 → 이상
+ #define PIR_ALERT_COOLDOWN_MS   (30UL * 1000)            // 알림 재전송 방지 쿨다운 30초
 
 // 0-9 숫자 패턴 (HIGH=켜짐, LOW=꺼짐) - 공통 캐소드
 // A, B, C, D, E, F, G 순서
@@ -128,32 +138,13 @@ bool  seg7ShowTarget   = false;   // true: 희망온도 3초 표시 중
 unsigned long seg7TargetEnd = 0;  // 희망온도 표시 종료 시각 (millis)
 #define SEG7_TARGET_SHOW_MS 3000  // 희망온도 표시 유지 시간 (ms)
  
-// ── DHT11 온습도 센서 (디지털) ────────────────────────────────────
-#define DHTPIN        33   // GPIO 33 — DHT11 DATA 핀 연결
-
- // ── PIR 센서 ─────────────────────────────────────────────────────
- #define PIN_PIR       27   // HC-SR501 OUT 핀 // *
- 
- // ── PIR 모드 정의 ─────────────────────────────────────────────────
- #define PIR_MODE_OFF      0   // 비활성
- #define PIR_MODE_PRESENCE 1   // 재실 감지 (정적 이상 감지)
- #define PIR_MODE_GUARD    2   // 방범 모드 (외출 시 침입 감지)
- 
- // ── PIR 타이밍 설정 ───────────────────────────────────────────────
- #define PIR_STATIC_TIMEOUT_MS   (4UL * 60 * 60 * 1000)  // 재실: 4시간 무움직임 → 이상
- #define PIR_ALERT_COOLDOWN_MS   (30UL * 1000)            // 알림 재전송 방지 쿨다운 30초
- 
  
  // ================================================================
  // 전역 객체
  // ================================================================
  
  WiFiClient tcpClient;
- 
- Servo servoBedroom;
- Servo servoGarage;
- Servo servoEntrance;
- 
+ Servo servoBedroom;   // 침실 커튼
  String rxBuffer = "";
  
 // ── DHT11 크로스태스크 공유 변수 (Core0 → Core1) ─────────────────
@@ -176,7 +167,7 @@ volatile bool  g_dhtReady = false; // 새 값이 준비됐을 때 true
    delay(500);
    Serial.println("\n[Boot] " DEVICE_ID " — 통합 5개 공간");
  
-   // ── LED 핀 초기화 ────────────────────────────────────────────
+  /* ── LED 핀 초기화 (비활성) ──────────────────────────────────────
    int ledPins[] = {
      PIN_LED_LIVING, PIN_LED_BATHROOM, PIN_LED_BEDROOM,
      PIN_LED_GARAGE, PIN_LED_ENTRANCE
@@ -186,24 +177,22 @@ volatile bool  g_dhtReady = false; // 새 값이 준비됐을 때 true
      digitalWrite(ledPins[i], LOW);
    }
    Serial.println("[LED] 5개 핀 초기화 완료");
- 
-   // ── 서보 초기화 ──────────────────────────────────────────────
+  ── LED 끝 ─────────────────────────────────────────────────────── */
+
+   // ── 서보 초기화 (침실 커튼) ──────────────────────────────────
    servoBedroom.attach(PIN_SERVO_BEDROOM);
-   servoGarage.attach(PIN_SERVO_GARAGE);
-   servoEntrance.attach(PIN_SERVO_ENTRANCE);
    servoBedroom.write(0);
-   servoGarage.write(0);
-   servoEntrance.write(0);
-   Serial.println("[SERVO] 3개 초기화 완료 (침실/차고/현관)");
+   Serial.println("[SERVO] 침실 서보 초기화 완료 (GPIO" + String(PIN_SERVO_BEDROOM) + ")");
  
    // ── 7세그먼트 초기화 ────────────────────────────────────────────
    initSeg7();
    Serial.println("[SEG7] 초기화 완료 (욕실) - 직접 핀 제어");
  
-  // ── DHT11 FreeRTOS 태스크 (Core 0) ──────────────────────────
+  // ── DHT11 FreeRTOS 태스크 (Core 1) ──────────────────────────
   // 내부 풀업 활성화 (외부 4.7kΩ 풀업 저항 없을 때 보조)
   pinMode(DHTPIN, INPUT_PULLUP);
-  // loop()는 Core 1에서 실행 → seg7 멀티플렉싱 블로킹 없음
+  // Core 1 사용: Core 0는 WiFi/TCP 스택 전용으로 비워둠
+  // (Core 0에서 noInterrupts() 실행 시 WiFi keepalive 누락 → TCP 끊김 방지)
   xTaskCreatePinnedToCore(
     taskDHT11,   // 함수
     "DHT11",     // 이름
@@ -211,16 +200,18 @@ volatile bool  g_dhtReady = false; // 새 값이 준비됐을 때 true
     NULL,        // 파라미터
     1,           // 우선순위
     NULL,        // 핸들 (불필요)
-    0            // Core 0
+    1            // Core 1 (WiFi 스택 간섭 방지)
   );
-  Serial.println("[DHT11] 태스크 생성 완료 (Core 0, GPIO33, 직접 비트-뱅)");
+  Serial.println("[DHT11] 태스크 생성 완료 (Core 1, GPIO33, 직접 비트-뱅)");
 
   // ── PIR 초기화 ───────────────────────────────────────────────
   pinMode(PIN_PIR, INPUT);
-   lastMotionTime = millis();
-   Serial.println("[PIR] 초기화 완료 (GPIO27) - 캘리브레이션 대기 중...");
-   delay(2000);  // 간단 캘리브레이션 대기
-   Serial.println("[PIR] 준비 완료");
+  lastMotionTime = millis();
+  Serial.println("[PIR] 초기화 완료 (GPIO27) - 캘리브레이션 대기 중...");
+  delay(2000);  // 간단 캘리브레이션 대기
+  // 첫 감지 즉시 발동 보장: 쿨다운이 이미 지난 것으로 설정
+  lastAlertTime = millis() - PIR_ALERT_COOLDOWN_MS;
+  Serial.println("[PIR] 준비 완료");
  
    connectWiFi();
    connectServer();
@@ -347,16 +338,18 @@ volatile bool  g_dhtReady = false; // 새 값이 준비됐을 때 true
      return;
    }
  
-   // ── LED ───────────────────────────────────────────────────────
+  /* ── LED (비활성) ────────────────────────────────────────────────
    if (strcmp(cmd, "led") == 0) {
      int pin = resolveLedPin(room);
      if (pin < 0) { sendError("unknown room for led"); return; }
      const char* state = doc["state"] | "off";
      cmdLed(pin, strcmp(state, "on") == 0, room);
      sendAck("led", "ok");
- 
+   } else
+  ── LED 끝 ─────────────────────────────────────────────────────── */
+
    // ── SERVO ─────────────────────────────────────────────────────
-   } else if (strcmp(cmd, "servo") == 0) {
+   if (strcmp(cmd, "servo") == 0) {
      Servo* sv = resolveServo(room);
      if (!sv) { sendError("unknown room for servo"); return; }
      int angle = doc["angle"] | 0;
@@ -384,51 +377,57 @@ volatile bool  g_dhtReady = false; // 새 값이 준비됐을 때 true
  }
  
  
- // ================================================================
- // room → LED 핀 매핑
- // ================================================================
+/* ================================================================
+// room → LED 핀 매핑 (비활성)
+// ================================================================
+int resolveLedPin(const char* room) {
+  if (strcmp(room, "living")   == 0) return PIN_LED_LIVING;
+  if (strcmp(room, "bathroom") == 0) return PIN_LED_BATHROOM;
+  if (strcmp(room, "bedroom")  == 0) return PIN_LED_BEDROOM;
+  if (strcmp(room, "garage")   == 0) return PIN_LED_GARAGE;
+  if (strcmp(room, "entrance") == 0) return PIN_LED_ENTRANCE;
+  return -1;
+}
+================================================================ */
  
- int resolveLedPin(const char* room) {
-   if (strcmp(room, "living")   == 0) return PIN_LED_LIVING;
-   if (strcmp(room, "bathroom") == 0) return PIN_LED_BATHROOM;
-   if (strcmp(room, "bedroom")  == 0) return PIN_LED_BEDROOM;
-   if (strcmp(room, "garage")   == 0) return PIN_LED_GARAGE;
-   if (strcmp(room, "entrance") == 0) return PIN_LED_ENTRANCE;
-   return -1;
- }
  
- 
- // ================================================================
- // room → Servo 객체 매핑
- // ================================================================
- 
- Servo* resolveServo(const char* room) {
-   if (strcmp(room, "bedroom")  == 0) return &servoBedroom;
-   if (strcmp(room, "garage")   == 0) return &servoGarage;
-   if (strcmp(room, "entrance") == 0) return &servoEntrance;
-   return nullptr;
- }
+// ================================================================
+// room → Servo 객체 매핑 (침실만 활성)
+// ================================================================
+
+Servo* resolveServo(const char* room) {
+  if (strcmp(room, "bedroom") == 0) return &servoBedroom;
+  return nullptr;  // garage, entrance 미사용
+}
  
  
  // ================================================================
  // PIR 센서 처리
  // ================================================================
  
- void handlePir() {
-   if (pirMode == PIR_MODE_OFF) return;
- 
-   bool motionDetected = (digitalRead(PIN_PIR) == HIGH);
-   unsigned long now   = millis();
- 
-   if (motionDetected) {
-     lastMotionTime = now;
-     pirAlertSent   = false;  // 움직임 있으면 알림 플래그 초기화
+void handlePir() {
+  bool motionDetected = (digitalRead(PIN_PIR) == HIGH);
+  unsigned long now   = millis();
+
+  // 상태 전환(없음 → 감지) 시에만 출력 + TCP 전송 (스팸 방지)
+  static bool prevMotion = false;
+  if (motionDetected && !prevMotion) {
+    Serial.println("[PIR] 감지됨!");
+    sendPirEvent("motion_detected", "living_room");
+  }
+  prevMotion = motionDetected;
+
+  if (pirMode == PIR_MODE_OFF) return;
+
+  if (motionDetected) {
+    lastMotionTime = now;
+    pirAlertSent   = false;  // 움직임 있으면 알림 플래그 초기화
  
      // 방범 모드: 움직임 감지 → 즉시 알림
      if (pirMode == PIR_MODE_GUARD) {
        if (now - lastAlertTime > PIR_ALERT_COOLDOWN_MS) {
          Serial.println("[PIR] 🚨 방범모드 - 움직임 감지!");
-         allLightsOn();
+         // allLightsOn();  // LED 비활성
          sendPirEvent("guard_alert", "motion_detected");
          lastAlertTime = now;
        }
@@ -463,29 +462,31 @@ volatile bool  g_dhtReady = false; // 새 값이 준비됐을 때 true
    }
  }
  
- void allLightsOn() {
-   int ledPins[] = {
-     PIN_LED_LIVING, PIN_LED_BATHROOM, PIN_LED_BEDROOM,
-     PIN_LED_GARAGE, PIN_LED_ENTRANCE
-   };
-   for (int i = 0; i < 5; i++) {
-     digitalWrite(ledPins[i], HIGH);
-   }
-   Serial.println("[PIR] 전체 조명 ON");
- }
+/* ── allLightsOn (비활성) ────────────────────────────────────────
+void allLightsOn() {
+  int ledPins[] = {
+    PIN_LED_LIVING, PIN_LED_BATHROOM, PIN_LED_BEDROOM,
+    PIN_LED_GARAGE, PIN_LED_ENTRANCE
+  };
+  for (int i = 0; i < 5; i++) {
+    digitalWrite(ledPins[i], HIGH);
+  }
+  Serial.println("[PIR] 전체 조명 ON");
+}
+─────────────────────────────────────────────────────────────── */
  
- void sendPirEvent(const char* eventType, const char* detail) {
-   if (!tcpClient.connected()) return;
-   String msg = "{\"type\":\"pir_event\",\"event\":\"";
-   msg += eventType;
-   msg += "\",\"detail\":\"";
-   msg += detail;
-   msg += "\",\"device_id\":\"";
-   msg += DEVICE_ID;
-   msg += "\"}\n";
-   tcpClient.print(msg);
-   Serial.printf("[PIR] 이벤트 전송: %s / %s\n", eventType, detail);
- }
+void sendPirEvent(const char* eventType, const char* detail) {
+  if (!tcpClient.connected()) return;
+  String msg = "{\"type\":\"pir_event\",\"location\":\"pir_living_room\",\"event\":\"";
+  msg += eventType;
+  msg += "\",\"detail\":\"";
+  msg += detail;
+  msg += "\",\"device_id\":\"";
+  msg += DEVICE_ID;
+  msg += "\"}\n";
+  tcpClient.print(msg);
+  Serial.printf("[PIR] 이벤트 전송: %s / %s (pir_living_room)\n", eventType, detail);
+}
  
  
 // ================================================================
@@ -603,12 +604,14 @@ void sendSensorData(float temp, const char* room) {
 // 디바이스 제어 함수
 // ================================================================
 
+/* ── cmdLed (비활성) ─────────────────────────────────────────────
 void cmdLed(int pin, bool on, const char* room) {
-   digitalWrite(pin, on ? HIGH : LOW);
-   Serial.printf("[LED] %s GPIO%d → %s\n", room, pin, on ? "ON" : "OFF");
- }
- 
- void cmdServo(Servo* sv, int angle, const char* room) {
+  digitalWrite(pin, on ? HIGH : LOW);
+  Serial.printf("[LED] %s GPIO%d → %s\n", room, pin, on ? "ON" : "OFF");
+}
+─────────────────────────────────────────────────────────────── */
+
+void cmdServo(Servo* sv, int angle, const char* room) {
    sv->write(angle);
    Serial.printf("[SERVO] %s → %d도\n", room, angle);
  }

@@ -8,6 +8,7 @@
 #   DISABLE_DB=1 ./run_server.sh                 # MySQL 로깅 없이 실행
 #
 # 환경 변수:
+#   .env 파일에서 민감정보 자동 로드 (cp .env_example .env)
 #   DISABLE_STT=1  : STT/웨이크워드 비활성화
 #   DISABLE_TTS=1  : TTS 비활성화
 #   DISABLE_DB=1   : MySQL 이벤트 로깅 비활성화
@@ -34,10 +35,21 @@ if [ -d ".venv" ] && [ -f ".venv/bin/activate" ]; then
     source .venv/bin/activate
 fi
 
+# .env 파일 로드
+if [ -f ".env" ]; then
+    set -a
+    source .env
+    set +a
+    echo ".env 환경변수 로드 완료"
+else
+    echo "경고: .env 파일 없음 — cp .env_example .env 로 생성하세요"
+fi
+
 # Ollama 실행 확인
+OLLAMA_URL="${OLLAMA_HOST:-http://localhost:11434}"
 if command -v ollama &>/dev/null; then
-    if curl -s http://localhost:11434/api/tags &>/dev/null; then
-        echo "Ollama 연결 확인 완료"
+    if curl -s "${OLLAMA_URL}/api/tags" &>/dev/null; then
+        echo "Ollama 연결 확인 완료 (${OLLAMA_URL})"
     else
         echo "경고: Ollama 서버 응답 없음 — ollama serve 실행 필요"
     fi
@@ -46,11 +58,18 @@ fi
 # MySQL 연결 확인 (DISABLE_DB가 아닐 때)
 if [ -z "$DISABLE_DB" ]; then
     if command -v mysql &>/dev/null; then
-        if mysql -u your_db_user -pyour_db_password -e "USE iot_smart_home;" 2>/dev/null; then
-            echo "MySQL 연결 확인 완료 (iot_smart_home)"
+        _DB_USER="${DB_USER:-}"
+        _DB_PASS="${DB_PASSWORD:-}"
+        _DB_HOST="${DB_HOST:-localhost}"
+        if [ -n "$_DB_USER" ] && [ -n "$_DB_PASS" ]; then
+            if mysql -u "$_DB_USER" -p"$_DB_PASS" -h "$_DB_HOST" -e "USE iot_smart_home;" 2>/dev/null; then
+                echo "MySQL 연결 확인 완료 (iot_smart_home@${_DB_HOST})"
+            else
+                echo "경고: MySQL 연결 실패 — DB 로깅이 자동 비활성화됩니다."
+                echo "  DB 설정: sudo mysql < scripts/init_db.sql"
+            fi
         else
-            echo "경고: MySQL 연결 실패 — DB 로깅이 자동 비활성화됩니다."
-            echo "  DB 설정: sudo mysql < scripts/init_db.sql"
+            echo "경고: DB_USER/DB_PASSWORD 미설정 — .env 파일을 확인하세요"
         fi
     else
         echo "경고: mysql 클라이언트 없음 — DB 연결 확인 스킵"

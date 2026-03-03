@@ -88,6 +88,7 @@ from pathlib import Path
 
 import yaml
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -118,14 +119,38 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.yaml"
+ENV_PATH    = Path(__file__).parent.parent / ".env"
 
 def load_settings() -> dict:
+    # .env 파일 로드 (없으면 무시)
+    load_dotenv(ENV_PATH)
+
     if not CONFIG_PATH.exists():
         logger.error(f"설정 파일 없음: {CONFIG_PATH}")
         sys.exit(1)
     with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     logger.info(f"설정 로드 완료: {CONFIG_PATH}")
+
+    # ── .env 환경변수로 민감정보 오버라이드 ──────────────────
+    if os.getenv("MIC_DEVICE"):
+        cfg.setdefault("stt", {})["mic_device"] = int(os.environ["MIC_DEVICE"])
+
+    if os.getenv("PORCUPINE_ACCESS_KEY"):
+        cfg.setdefault("stt", {})["porcupine_access_key"] = os.environ["PORCUPINE_ACCESS_KEY"]
+
+    if os.getenv("DB_HOST"):
+        cfg.setdefault("database", {})["host"] = os.environ["DB_HOST"]
+    if os.getenv("DB_USER"):
+        cfg.setdefault("database", {})["user"] = os.environ["DB_USER"]
+    if os.getenv("DB_PASSWORD"):
+        cfg.setdefault("database", {})["password"] = os.environ["DB_PASSWORD"]
+
+    if os.getenv("OLLAMA_HOST"):
+        cfg.setdefault("ollama", {})["host"] = os.environ["OLLAMA_HOST"]
+    if os.getenv("LLM_MODEL"):
+        cfg.setdefault("ollama", {})["model"] = os.environ["LLM_MODEL"]
+
     return cfg
 
 

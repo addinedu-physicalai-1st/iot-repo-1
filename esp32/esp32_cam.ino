@@ -17,18 +17,11 @@
 #include "esp_heap_caps.h"   // PSRAM 확인용
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include "config.h"          // WiFi/서버 민감정보 (config.h.example 참조)
 
 // ──────────────────────────────────────────
-// Wi-Fi 설정
+// 서버 설정 (SERVER_IP는 config.h에서 정의)
 // ──────────────────────────────────────────
-#define WIFI_SSID      "addinedu_201class_2-2.4G"
-#define WIFI_PASSWORD  "201class2!"
-
-
-// ──────────────────────────────────────────
-// 서버 설정
-// ──────────────────────────────────────────
-const char*    SERVER_IP   = "192.168.0.154";  // Python 서버 IP
 const uint16_t SERVER_PORT = 5005;             // camera_stream.py UDP 포트
 const uint16_t LOCAL_PORT  = 5006;             // ESP-CAM 로컬 UDP 포트
 

@@ -326,8 +326,8 @@ async function activateServerSTT() {
   } catch (e) { /* WS만으로도 동작 */ }
 }
 
-/* ESP32 설정 - 여기에 ESP32의 IP 주소를 입력하세요 */
-const ESP32_IP = "192.168.0.6"; // ESP32의 실제 IP 주소로 변경 필요
+/* ESP32 설정 - 서버에서 설정을 가져오거나, 아래 IP를 직접 수정하세요 */
+const ESP32_IP = "ESP32_IP_HERE"; // ESP32의 실제 IP 주소로 변경 필요
 
 /* ESP32 제어 함수 */
 async function controlESP32(endpoint){
