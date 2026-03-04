@@ -310,6 +310,42 @@ class STTEngine:
 
         logger.info("[STT] 엔진 종료")
 
+    async def set_mic_device(self, device_index: int) -> bool:
+        """
+        마이크 장치를 런타임에 교체
+        - 현재 스트림을 닫고 새 device_index로 재시작
+        - STT 엔진이 구동 중일 때만 동작 (start() 이후)
+        """
+        if not self._running:
+            self.mic_device = device_index
+            logger.info(f"[STT] 마이크 설정 변경 (미구동 중): device={device_index}")
+            return True
+
+        try:
+            # 기존 스트림 중단
+            if self._stream:
+                self._stream.stop()
+                self._stream.close()
+                self._stream = None
+
+            self.mic_device = device_index
+
+            # 새 장치로 스트림 재시작
+            self._stream = sd.RawInputStream(
+                samplerate=SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype=DTYPE_INT16,
+                blocksize=PORCUPINE_FRAME_SIZE,
+                device=self.mic_device,
+                callback=self._audio_callback,
+            )
+            self._stream.start()
+            logger.info(f"[STT] 마이크 변경 완료: device={device_index}")
+            return True
+        except Exception as e:
+            logger.error(f"[STT] 마이크 변경 실패 device={device_index}: {e}")
+            return False
+
     def activate(self):
         """버튼 모드: 외부 트리거 → 직접 LISTENING 전환"""
         if self._state == STATE_IDLE:
@@ -848,3 +884,15 @@ class STTEngine:
             return "", "hallucination"
 
         return text, None
+
+    async def run_with_retry(self):
+        """start() 래퍼: 실패 시 재시도"""
+        retry_delay = 5
+        while True:
+            try:
+                await self.start()
+                break
+            except Exception as e:
+                logger.error(f"[STT] 시작 실패: {e} → {retry_delay}초 후 재시도")
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60)

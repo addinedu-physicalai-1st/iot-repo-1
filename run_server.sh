@@ -80,4 +80,25 @@ echo ""
 echo "서버 시작 중... (TCP:9000 / HTTP+WS:8000)"
 echo "  웹 대시보드: http://localhost:8000/"
 echo ""
-uvicorn server.main:app --host 0.0.0.0 --port 8000
+
+# uvicorn 백그라운드 실행
+uvicorn server.main:app --host 0.0.0.0 --port 8000 &
+UVICORN_PID=$!
+
+# 서버 준비 대기 (최대 30초)
+echo "서버 준비 대기 중..."
+for _ in $(seq 1 60); do
+  if curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/ 2>/dev/null | grep -q 200; then
+    echo "서버 준비 완료"
+    break
+  fi
+  sleep 0.5
+done
+
+# 기본 브라우저에서 대시보드 자동 열기 (Linux)
+if command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "http://localhost:8000/" >/dev/null 2>&1
+fi
+
+# uvicorn 종료 대기
+wait $UVICORN_PID

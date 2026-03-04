@@ -21,7 +21,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Query, WebSocket, HTTPException
+from fastapi import APIRouter, Query, Request, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 
@@ -54,6 +54,11 @@ class CommandRequest(BaseModel):
 class VoiceRequest(BaseModel):
     """POST /voice 요청 바디"""
     text: str                         # STT 변환된 텍스트
+
+
+class MicDeviceRequest(BaseModel):
+    """POST /stt/mic-device 요청 바디"""
+    index: int
 
 
 class CommandResponse(BaseModel):
@@ -207,6 +212,85 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRout
                 stt = app.state.stt_engine
                 return getattr(stt, 'state', 'N/A') if stt else 'DISABLED'
         return 'N/A'
+
+    def _get_stt_engine():
+        import sys
+        for mod in sys.modules.values():
+            app = getattr(mod, 'app', None)
+            if app and hasattr(getattr(app, 'state', None), 'stt_engine'):
+                return app.state.stt_engine
+        return None
+
+    # ── GET /stt/devices ─────────────────────────────────────────
+    @router.get("/stt/devices")
+    async def stt_devices(request: Request):
+        """서버에서 인식 가능한 마이크(입력 장치) 목록 반환"""
+        import sounddevice as sd
+
+        # 마이크 목록 조회 (STT 엔진과 무관하게 항상 시도)
+        try:
+            devices = sd.query_devices()
+        except Exception as e:
+            return {"devices": [], "current": None, "error": f"sounddevice: {e}"}
+
+        def _val(d, key, default=0):
+            try:
+                return d.get(key, default) if hasattr(d, "get") else getattr(d, key, default)
+            except Exception:
+                return default
+
+        mic_list = []
+        for i, d in enumerate(devices):
+            max_in = _val(d, "max_input_channels", 0)
+            if max_in <= 0:
+                continue
+            name = _val(d, "name", f"Device {i}")
+            sr = _val(d, "default_samplerate", 0)
+            mic_list.append({"index": i, "name": str(name), "channels": int(max_in), "sample_rate": int(sr)})
+
+        # 현재 STT 마이크 인덱스 (실패해도 devices는 반환)
+        current_idx = None
+        try:
+            stt = getattr(request.app.state, "stt_engine", None)
+            if stt is not None:
+                current_idx = getattr(stt, "mic_device", None)
+        except Exception:
+            pass
+
+        return {"devices": mic_list, "current": current_idx}
+
+    # ── POST /stt/mic-device ──────────────────────────────────────
+    # @router.post("/stt/mic-device", response_model=CommandResponse)
+    # async def stt_set_mic_device(req: MicDeviceRequest):
+    #     """마이크 장치 변경 (런타임 교체)"""
+    #     stt = _get_stt_engine()
+    #     if stt is None:
+    #         return CommandResponse(status="warn", msg="STTEngine 비활성화 상태 (DISABLE_STT=1)")
+
+    #     ok = await stt.set_mic_device(req.index)
+    #     if ok:
+    #         logger.info(f"[API] 마이크 변경 완료: device={req.index}")
+    #         return CommandResponse(status="ok", msg=f"마이크 변경 완료: device={req.index}")
+    #     else:
+    #         return CommandResponse(status="fail", msg=f"마이크 변경 실패: device={req.index}")
+
+    @router.post("/stt/mic-device", response_model=CommandResponse)
+    async def stt_set_mic_device(request: Request, req: MicDeviceRequest):
+        """마이크 장치 변경 (런타임 교체)"""
+        stt = getattr(request.app.state, "stt_engine", None)
+        if stt is None:
+            return CommandResponse(status="warn", msg="STTEngine 비활성화 상태 (DISABLE_STT=1)")
+
+        ok = await stt.set_mic_device(req.index)
+        if ok:
+            # 아직 STT가 안 돌아가고 있다면 여기서 시작
+            if not getattr(stt, "_running", False):
+                import asyncio
+                asyncio.create_task(stt.run_with_retry())
+            logger.info(f"[API] 마이크 변경 완료: device={req.index}")
+            return CommandResponse(status="ok", msg=f"마이크 변경 완료: device={req.index}")
+        else:
+            return CommandResponse(status="fail", msg=f"마이크 변경 실패: device={req.index}")
 
     # ── SR-3.2: 이벤트 로그 검색/조회 API ─────────────────────────
 
