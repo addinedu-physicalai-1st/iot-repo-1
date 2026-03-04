@@ -73,7 +73,7 @@ stt:
   porcupine_access_key: ""   # .env PORCUPINE_ACCESS_KEY 사용
   porcupine_model_path: "models/자비스야_ko_linux_v4_0_0.ppn"
   porcupine_params_path: "models/porcupine_params_ko.pv"
-  mic_device: 11
+  mic_device: 10
   vad_energy_threshold: 0.02
   noise_reduction: false
   noise_prop_decrease: 0.85

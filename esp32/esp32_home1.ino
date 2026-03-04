@@ -124,6 +124,10 @@ const byte digitPatterns[10][7] = {
   {HIGH, HIGH, HIGH, HIGH, LOW,  HIGH, HIGH}   // 9
 };
 
+// 마이너스(-) 기호: 가운데 세그먼트(G)만 ON
+#define SEG7_IDX_MINUS  10
+const byte minusPattern[7] = {LOW, LOW, LOW, LOW, LOW, LOW, HIGH};
+
 // ── 7세그먼트 상태 변수 ───────────────────────────────────────────────
 int  seg7Digits[4]  = {0, 0, 0, 0};
 bool seg7Enabled    = false;
@@ -355,7 +359,7 @@ volatile bool  g_dhtReady = false; // 새 값이 준비됐을 때 true
      int angle = doc["angle"] | 0;
      angle = constrain(angle, 0, 180);
      cmdServo(sv, angle, room);
-     sendAck("servo", "ok");
+     sendAckServo("ok", angle, resolveServoPin(room));
  
    // ── SEG7 ──────────────────────────────────────────────────────
    } else if (strcmp(cmd, "seg7") == 0) {
@@ -398,6 +402,11 @@ int resolveLedPin(const char* room) {
 Servo* resolveServo(const char* room) {
   if (strcmp(room, "bedroom") == 0) return &servoBedroom;
   return nullptr;  // garage, entrance 미사용
+}
+
+int resolveServoPin(const char* room) {
+  if (strcmp(room, "bedroom") == 0) return PIN_SERVO_BEDROOM;
+  return -1;
 }
  
  
@@ -692,11 +701,15 @@ void clearSeg7() {
 }
  
 // ── 온도값 → seg7Digits 변환 ─────────────────────────────────────────
-// 표시 배치: [OFF][십의자리][일의자리+DP][소수점첫째]
+// 표시 배치: [-/OFF][십의자리][일의자리+DP][소수점첫째]
 // 예) 23.5°C → [OFF][2][3.][5]
+// 예) -5.3°C → [-  ][0][5.][3]  (첫째 자리에 '-' 표시)
 void setTempDisplay(float temp) {
-  int v = (int)(temp * 10.0f + 0.5f);  // 소수점 제거: 23.5 → 235
-  seg7Digits[0] = 0;           // 첫째 자리: 항상 OFF (표시 루프에서 건너뜀)
+  bool isNeg   = (temp < 0.0f);
+  float absTemp = isNeg ? -temp : temp;
+  int v = (int)(absTemp * 10.0f + 0.5f);  // 소수점 제거: 5.3 → 53
+
+  seg7Digits[0] = isNeg ? SEG7_IDX_MINUS : 0;  // 음수면 '-', 양수면 OFF
   seg7Digits[1] = (v / 100) % 10;  // 십의 자리
   seg7Digits[2] = (v / 10)  % 10;  // 일의 자리 (DP는 updateSeg7에서 처리)
   seg7Digits[3] =  v        % 10;  // 소수 첫째 자리
@@ -715,9 +728,11 @@ void displayDigit(int digit, int number, bool dp) {
   // 해당 디지트 선택 (LOW = 켜짐)
   digitalWrite(digitPins[digit], LOW);
 
-  // 숫자 패턴 출력
-  for (int i = 0; i < 7; i++) {
-    digitalWrite(segPins[i], digitPatterns[number][i]);
+  // 숫자 or 마이너스 패턴 출력
+  if (number == SEG7_IDX_MINUS) {
+    for (int i = 0; i < 7; i++) digitalWrite(segPins[i], minusPattern[i]);
+  } else {
+    for (int i = 0; i < 7; i++) digitalWrite(segPins[i], digitPatterns[number][i]);
   }
 
   // 소수점
@@ -742,13 +757,13 @@ void updateSeg7() {
   unsigned long now = millis();
   if (now - lastSeg7Update >= SEG7_REFRESH_INTERVAL) {
 
-    if (currentDigit == 0) {
-      // 첫째 자리는 항상 OFF: 이전(digit 3)만 끄고 아무것도 켜지 않음
+    if (currentDigit == 0 && seg7Digits[0] == 0) {
+      // 첫째 자리 OFF (양수 온도): 이전(digit 3)만 끄고 아무것도 켜지 않음
       digitalWrite(digitPins[3], HIGH);
       for (int i = 0; i < 7; i++) digitalWrite(segPins[i], LOW);
       digitalWrite(PIN_DP, LOW);
     } else {
-      // 세번째 자리(index 2)에는 소수점 ON
+      // 세번째 자리(index 2)에는 소수점 ON / 첫째 자리는 음수 '-' 표시
       bool dp = (currentDigit == 2);
       displayDigit(currentDigit, seg7Digits[currentDigit], dp);
     }
@@ -771,6 +786,18 @@ void updateSeg7() {
    tcpClient.print(msg);
    Serial.printf("[ACK] cmd=%s status=%s\n", cmd, status);
  }
+
+void sendAckServo(const char* status, int angle, int pin) {
+  String msg = "{\"type\":\"ack\",\"cmd\":\"servo\",\"status\":\"";
+  msg += status;
+  msg += "\",\"angle\":";
+  msg += angle;
+  msg += ",\"pin\":";
+  msg += pin;
+  msg += "}\n";
+  tcpClient.print(msg);
+  Serial.printf("[ACK] cmd=servo status=%s angle=%d pin=%d\n", status, angle, pin);
+}
  
  void sendError(const char* errMsg) {
    String msg = "{\"type\":\"error\",\"msg\":\"";

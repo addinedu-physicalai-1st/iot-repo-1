@@ -78,6 +78,6 @@ fi
 
 echo ""
 echo "서버 시작 중... (TCP:9000 / HTTP+WS:8000)"
-echo "  웹 대시보드: http://localhost:8000/dashboard"
+echo "  웹 대시보드: http://localhost:8000/"
 echo ""
 uvicorn server.main:app --host 0.0.0.0 --port 8000
