@@ -4334,6 +4334,9 @@ function handleSmartGateEvent(data) {
     document.getElementById('camLastEvent').textContent =
       '마지막: 🚪 SmartGate 인증 성공 (' + ts + ')';
   }
+  else if (event === 'gate_open') {
+    log('🚪 [SmartGate] 게이트 열림 — ' + (data.open_duration_sec || 5) + '초 후 자동 닫힘', 'ok');
+  }
   else if (event === 'lockout_start') {
     log('🔒 [SmartGate] 잠금! ' + (data.lockout_sec || 30) + '초 대기', 'fail');
     showToast('🔒 SmartGate 잠금 — 연속 실패', 'fail', 5000);

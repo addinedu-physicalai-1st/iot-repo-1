@@ -19,6 +19,11 @@ v1.1 변경사항:
     · 제스처 인증, 2FA 성공, 게이트 오픈/닫힘
     · 잠금(lockout), PIR 환영 트리거
 
+v1.2 변경사항:
+  - 2FA 성공 후 gate_open 이벤트 브로드캐스트 추가
+    (auth_success와 gate_open 분리 → Command Log에 "게이트 열림" 표시 보장)
+  - 게이트 열림 시 서버 로그 추가
+
 인증 흐름:
   IDLE → (얼굴 인증) → LIVENESS → (챌린지 통과) → FACE_OK
        → (제스처 인증) → GESTURE_OK → (게이트 오픈) → IDLE
@@ -437,6 +442,10 @@ class SmartGateManager:
                 # 게이트 오픈
                 self.gate_ctrl.open_gate()
                 self._fail_count = 0
+                logger.info(
+                    f"[SmartGate] 🚪 게이트 열림 | "
+                    f"{self.gate_ctrl._open_duration}초 후 자동 닫힘"
+                )
 
                 self._db_log(
                     f"2FA 인증 성공: {self._authenticated_user}",
@@ -447,10 +456,16 @@ class SmartGateManager:
                     },
                 )
 
+                # v1.2: auth_success + gate_open 이벤트를 분리 브로드캐스트
                 await self._broadcast_event(
                     "auth_success",
                     user=self._authenticated_user,
                     sequence=list(self.gesture_auth.target_sequence),
+                )
+                await self._broadcast_event(
+                    "gate_open",
+                    user=self._authenticated_user,
+                    open_duration_sec=self.gate_ctrl._open_duration,
                 )
 
                 # ── PIR 환영 대기 모드 ──
