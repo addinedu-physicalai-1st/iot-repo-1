@@ -801,6 +801,13 @@ header {
 .cam-info-row {
   display:flex; justify-content:space-between; align-items:center;
   margin-bottom:8px;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.cam-raw-toggle {
+  font-size:0.7rem; color:var(--text2);
+  cursor:pointer; user-select:none;
+  display:flex; align-items:center; gap:5px;
 }
 .cam-status-wrap {
   display:flex; align-items:center; gap:6px;
@@ -1811,6 +1818,9 @@ header {
 
         <!-- 하단 정보바 -->
         <div class="cam-info-row">
+          <label class="cam-raw-toggle" title="지연 최소: 재인코딩 없이 원본 전송">
+            <input type="checkbox" id="camRawMode" onchange="camRawModeChange()"> 지연 최소
+          </label>
           <button class="cam-btn-snapshot" onclick="camSnapshot()">📸 스냅샷</button>
           <button class="cam-btn-snapshot" onclick="camToggleStream()" id="camToggleBtn">▶ 스트림 시작</button>
           <button class="cam-btn-arm" id="sgArmBtn" onclick="sgToggleArm()">🔓 인증 시작</button>
@@ -3857,6 +3867,10 @@ window.onload = () => {
   loadYouTubeAPI();
   drawHouse();  // 3D 하우스 초기 렌더링
 
+  // 카메라 지연 최소 모드 복원
+  const rawEl = document.getElementById('camRawMode');
+  if (rawEl && localStorage.getItem('cam_raw_mode') === '1') rawEl.checked = true;
+
   // localStorage 백업에서 PIR 모드 즉시 복원 (서버 응답 전 UI 선반영)
   const savedMode = localStorage.getItem('pir_mode');
   if (savedMode && PIR_MODE_CONFIG[savedMode]) {
@@ -3912,6 +3926,19 @@ function showToast(msg, type = 'ok', duration = 3000) {
 // 현관 ESP32-CAM 카메라 모듈
 // ════════════════════════════════════════════
 let _camStreaming  = false;
+
+function camStreamUrl() {
+  return document.getElementById('camRawMode')?.checked
+    ? '/camera/entrance/raw'
+    : '/camera/entrance/stream';
+}
+
+function camRawModeChange() {
+  if (!_camStreaming) return;
+  const img = document.getElementById('camStream');
+  if (img) img.src = camStreamUrl() + '?' + Date.now();
+  localStorage.setItem('cam_raw_mode', document.getElementById('camRawMode')?.checked ? '1' : '0');
+}
 let _camAlarmOsc  = null;
 let _audioCtx     = null;
 
@@ -3939,7 +3966,7 @@ function camToggleStream() {
   } else {
     ph.style.display  = 'none';
     img.style.display = 'block';
-    img.src = '/camera/entrance/stream?' + Date.now();
+    img.src = camStreamUrl() + '?' + Date.now();
     btn.textContent = '■ 스트림 중지';
     _camStreaming = true;
     showToast('📷 현관 카메라 스트림 연결 중...', 'cam', 2500);
@@ -3965,7 +3992,7 @@ function onCamError() {
   if (_camStreaming) {
     setTimeout(() => {
       const img = document.getElementById('camStream');
-      img.src = '/camera/entrance/stream?' + Date.now();
+      img.src = camStreamUrl() + '?' + Date.now();
     }, 5000);
   }
 }

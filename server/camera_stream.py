@@ -44,10 +44,11 @@ logger = logging.getLogger(__name__)
 UDP_IP            = "0.0.0.0"
 UDP_PORT          = 5005          # ESP-CAM UDP 송신 포트
 UDP_BUFFER_SIZE   = 65535         # UDP 최대 수신 버퍼
-FRAME_QUEUE_SIZE  = 10            # 최신 프레임 큐 (5→10, 버퍼 여유)
-ANALYZE_EVERY     = 20            # 매 N 프레임마다 분석 (CPU 절약)
+UDP_RCVBUF_BYTES  = 1024 * 1024   # SO_RCVBUF 1MB (네트워크 스택 버퍼링 최소화)
+FRAME_QUEUE_SIZE  = 10            # 최신 프레임 큐 (분석용, 지연 민감 시 ANALYZE_EVERY↑)
+ANALYZE_EVERY     = 20            # 매 N 프레임마다 분석 (CPU 절약, 키우면 지연 영향↓)
 STREAM_FPS_LIMIT  = 10            # MJPEG HTTP 스트림 FPS (15→10, 끊김 방지)
-JPEG_QUALITY      = 70            # 재압축 JPEG 품질 (80→70, 전송량 감소)
+JPEG_QUALITY      = 70            # 재압축 JPEG 품질 (오버레이 스트림용)
 SMARTGATE_EVERY   = 1             # v1.6: 매 N 프레임마다 SmartGate에 공급
 
 # ESP-CAM 패킷 헤더 구조 (Arduino 펌웨어와 일치해야 함)
@@ -55,6 +56,12 @@ SMARTGATE_EVERY   = 1             # v1.6: 매 N 프레임마다 SmartGate에 공
 MAGIC             = b'\xAB\xCD\xEF\x01'
 HEADER_FMT        = ">4sIIHH"
 HEADER_SIZE       = struct.calcsize(HEADER_FMT)  # 16 bytes
+
+# 하이브리드 재전송: frame_id 기준 손실률 → ESP32에 quality_down/up UDP 명령
+ESP32_UDP_CMD_PORT = 5006         # esp32_cam.ino LOCAL_PORT (명령 수신 포트)
+LOSS_RATE_THRESHOLD = 0.15        # 15% 이상 손실 시 quality_down
+LOSS_RATE_RECOVERY  = 0.05       # 5% 이하로 유지 시 quality_up
+LOSS_WINDOW_SIZE    = 50         # 손실률 계산 윈도우 (프레임 수)
 
 # ──────────────────────────────────────────
 # 전역 상태
@@ -269,18 +276,33 @@ def _udp_multipart_receiver():
     """
     멀티파트 모드: MAGIC + 헤더로 프레임 조립
     [magic 4B][frame_id 4B][total_len 4B][part_idx 2B][total_parts 2B][JPEG chunk...]
+    frame_id 기준 손실률 계산 → 일정 이상 시 ESP32에 quality_down/up UDP 명령 전송
     """
     global _latest_frame
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, UDP_RCVBUF_BYTES)
     sock.settimeout(1.0)
     sock.bind((UDP_IP, UDP_PORT))
     logger.info(f"[CameraStream] UDP 멀티파트 수신 시작 — {UDP_IP}:{UDP_PORT}")
 
+    # ESP32 명령 전송용 소켓 (별도, bind 불필요)
+    try:
+        send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        send_sock = None
+
     frame_count = 0
     frame_parts = {}         # {frame_id: {part_idx: data, ...}}
     frame_meta  = {}         # {frame_id: (total_len, total_parts)}
+
+    # 하이브리드 재전송: 손실률 추적
+    last_seen_frame_id = None
+    total_lost = 0
+    total_received = 0
+    last_quality_cmd = ""    # "down" | "up" | ""
+    frames_since_cmd = 0
 
     while _running:
         try:
@@ -299,6 +321,7 @@ def _udp_multipart_receiver():
         if magic != MAGIC:
             continue
 
+        esp32_addr = (addr[0], ESP32_UDP_CMD_PORT)  # ESP32 수신 포트로 명령 전송
         payload = data[HEADER_SIZE:]
 
         if frame_id not in frame_parts:
@@ -319,6 +342,37 @@ def _udp_multipart_receiver():
                 _frame_queue.append((frame_count, jpeg_bytes))
                 frame_count += 1
 
+                # 손실률 계산 (frame_id 갭 기반)
+                if last_seen_frame_id is not None and frame_id > last_seen_frame_id + 1:
+                    lost = frame_id - last_seen_frame_id - 1
+                    total_lost += lost
+                total_received += 1
+                last_seen_frame_id = frame_id
+                frames_since_cmd += 1
+
+                # 윈도우마다 손실률 체크 → quality_down/up 전송
+                n = total_received + total_lost
+                if n >= LOSS_WINDOW_SIZE and frames_since_cmd >= 20 and send_sock:
+                    loss_rate = total_lost / max(1, n)
+                    if loss_rate >= LOSS_RATE_THRESHOLD and last_quality_cmd != "down":
+                        try:
+                            send_sock.sendto(b"quality_down", esp32_addr)
+                            last_quality_cmd = "down"
+                            frames_since_cmd = 0
+                            logger.info(f"[CameraStream] 손실률 {loss_rate:.0%} → quality_down 전송")
+                        except OSError:
+                            pass
+                    elif loss_rate <= LOSS_RATE_RECOVERY and last_quality_cmd == "down":
+                        try:
+                            send_sock.sendto(b"quality_up", esp32_addr)
+                            last_quality_cmd = ""
+                            frames_since_cmd = 0
+                            logger.info(f"[CameraStream] 손실률 {loss_rate:.0%} → quality_up 전송")
+                        except OSError:
+                            pass
+                    total_lost = 0
+                    total_received = 0
+
             del frame_parts[frame_id]
             del frame_meta[frame_id]
 
@@ -329,6 +383,11 @@ def _udp_multipart_receiver():
             if fid in frame_meta:
                 del frame_meta[fid]
 
+    if send_sock:
+        try:
+            send_sock.close()
+        except OSError:
+            pass
     sock.close()
     logger.info("[CameraStream] UDP 멀티파트 수신 스레드 종료")
 
@@ -640,6 +699,39 @@ async def mjpeg_generator():
         yield (b"--frame\r\n"
                b"Content-Type: image/jpeg\r\n\r\n" +
                buf.tobytes() + b"\r\n")
+
+
+# ──────────────────────────────────────────
+# Raw MJPEG 제너레이터 (지연 최소)
+# 디코드/오버레이/재인코딩 없이 _latest_frame 바이트를 그대로 전송
+# → /camera/entrance/raw 에서 사용
+# ──────────────────────────────────────────
+async def mjpeg_raw_generator():
+    """원본 JPEG을 재인코딩 없이 MJPEG으로 전송 — 지연 최소"""
+    interval    = 1.0 / STREAM_FPS_LIMIT
+    last_sent   = None
+    placeholder = _make_placeholder()
+
+    while True:
+        await asyncio.sleep(interval)
+
+        with _frame_lock:
+            jpeg_bytes = _latest_frame
+
+        if jpeg_bytes is None:
+            yield (b"--frame\r\n"
+                   b"Content-Type: image/jpeg\r\n\r\n" +
+                   placeholder + b"\r\n")
+            await asyncio.sleep(1.0)
+            continue
+
+        if jpeg_bytes is last_sent:
+            continue
+        last_sent = jpeg_bytes
+
+        yield (b"--frame\r\n"
+               b"Content-Type: image/jpeg\r\n\r\n" +
+               jpeg_bytes + b"\r\n")
 
 
 def _make_placeholder() -> bytes:

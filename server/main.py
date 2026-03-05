@@ -19,7 +19,8 @@ v0.8 변경사항:
   - frame_analyzer.py : InsightFace 얼굴인식 + YOLOv8 객체감지
   - face_db.py        : 등록 얼굴 DB REST API 라우터
   - 신규 엔드포인트:
-      GET  /camera/entrance/stream    MJPEG HTTP 스트림
+      GET  /camera/entrance/stream    MJPEG HTTP 스트림 (오버레이 포함)
+      GET  /camera/entrance/raw       MJPEG Raw (지연 최소, 재인코딩 없음)
       GET  /camera/entrance/snapshot  스냅샷 JPEG 1장
       GET  /face-db/list              등록 인물 목록
       POST /face-db/register          얼굴 등록 (multipart)
@@ -372,7 +373,8 @@ def create_app() -> FastAPI:
             # ESP-CAM 설정 (settings.yaml camera 블록 있으면 사용)
             _cam_cfg    = cfg.get("camera", {})
             _udp_port   = _cam_cfg.get("udp_port",   5005)
-            _multipart  = _cam_cfg.get("multipart",  False)
+            # 항상 멀티파트 모드 사용 (헤더+조각 조립)
+            _multipart  = _cam_cfg.get("multipart",  True)
             _analyze_n  = _cam_cfg.get("analyze_every", 10)
 
             cam_mod.UDP_PORT       = _udp_port
@@ -560,7 +562,7 @@ def create_app() -> FastAPI:
     @app.get("/camera/entrance/stream")
     async def camera_entrance_stream():
         """
-        현관 ESP32-CAM MJPEG HTTP 스트림
+        현관 ESP32-CAM MJPEG HTTP 스트림 (오버레이 포함, 분석용)
         웹앱: <img src="/camera/entrance/stream">
         """
         if disable_cam:
@@ -582,6 +584,34 @@ def create_app() -> FastAPI:
                 "Cache-Control":    "no-cache, no-store, must-revalidate",
                 "Pragma":           "no-cache",
                 "X-Accel-Buffering":"no",   # nginx reverse proxy 버퍼링 비활성화
+            },
+        )
+
+    @app.get("/camera/entrance/raw")
+    async def camera_entrance_raw():
+        """
+        현관 ESP32-CAM Raw MJPEG 스트림 (지연 최소)
+        디코드/오버레이/재인코딩 없이 원본 JPEG 전송
+        """
+        if disable_cam:
+            return JSONResponse(
+                {"status": "error", "msg": "카메라 비활성화 (DISABLE_CAM=1)"},
+                status_code=503,
+            )
+        try:
+            from server.camera_stream import mjpeg_raw_generator
+        except ImportError:
+            return JSONResponse(
+                {"status": "error", "msg": "camera_stream 모듈 없음"},
+                status_code=503,
+            )
+        return StreamingResponse(
+            mjpeg_raw_generator(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control":    "no-cache, no-store, must-revalidate",
+                "Pragma":           "no-cache",
+                "X-Accel-Buffering":"no",
             },
         )
 

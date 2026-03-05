@@ -163,6 +163,16 @@ devices:
           default_angle: 0
 
 # ================================================================
+# ESP32-CAM / Camera 설정
+# ================================================================
+camera:
+  udp_port: 5005          # ESP32-CAM이 보내는 UDP 포트 (esp32_cam.ino SERVER_PORT와 동일)
+  multipart: true         # 항상 멀티파트 모드 사용 (MAGIC 헤더 + 조각 전송)
+  analyze_every: 10       # 매 N 프레임마다 분석 (키우면 CPU·지연↓, 예: 20)
+  # 하이브리드 재전송: frame_id 손실률 기반 적응형 품질 (camera_stream.py 상수)
+  # loss_threshold: 0.15 → quality_down, loss_recovery: 0.05 → quality_up
+
+# ================================================================
 # LLM 명령 → device_id 매핑 키워드
 # v3: esp32_home1 (침실서보/욕실seg7·DHT11) + esp32_home2 (LED5개/차고·현관서보/PIR)
 # ================================================================
