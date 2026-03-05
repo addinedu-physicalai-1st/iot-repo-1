@@ -17,12 +17,14 @@ FastAPI REST 엔드포인트 + WebSocket 라우터
 
 from __future__ import annotations
 
+import base64
 import logging
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 from fastapi import APIRouter, Query, Request, WebSocket, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from pydantic import BaseModel
 
 from protocol.schema import validate_command, ws_cmd_result
@@ -61,6 +63,12 @@ class MicDeviceRequest(BaseModel):
     index: int
 
 
+class TranscribeAudioRequest(BaseModel):
+    """POST /stt/transcribe-audio 요청 바디 (브라우저 마이크용)"""
+    audio: str          # base64 인코딩된 PCM int16 (mono)
+    sample_rate: int = 16000
+
+
 class CommandResponse(BaseModel):
     """공통 응답"""
     status: str                       # ok / fail / unknown
@@ -83,6 +91,12 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRout
     db_logger       : DBLogger 인스턴스 (선택)
     """
     router = APIRouter()
+
+    # ── GET /favicon.ico ─────────────────────────────────────────────
+    @router.get("/favicon.ico")
+    async def favicon():
+        """favicon 없음 — 404 방지"""
+        return Response(status_code=204)
 
     # ── GET / ───────────────────────────────────────────────────────
     @router.get("/", response_class=HTMLResponse)
@@ -291,6 +305,22 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRout
             return CommandResponse(status="ok", msg=f"마이크 변경 완료: device={req.index}")
         else:
             return CommandResponse(status="fail", msg=f"마이크 변경 실패: device={req.index}")
+
+    # ── POST /stt/transcribe-audio (브라우저 마이크 → Whisper) ─────
+    @router.post("/stt/transcribe-audio")
+    async def stt_transcribe_audio(request: Request, req: TranscribeAudioRequest):
+        """브라우저에서 캡처한 오디오 → Whisper 전사 (원격/모바일 접속 시)"""
+        stt = getattr(request.app.state, "stt_engine", None)
+        if stt is None:
+            return {"text": "", "status": "warn", "msg": "STTEngine 비활성화 (DISABLE_STT=1)"}
+        try:
+            raw = base64.b64decode(req.audio)
+            audio = np.frombuffer(raw, dtype=np.int16)
+            text = await stt.transcribe_audio(audio, sample_rate=req.sample_rate)
+            return {"text": text, "status": "ok"}
+        except Exception as e:
+            logger.warning(f"[API] transcribe-audio 오류: {e}")
+            return {"text": "", "status": "fail", "msg": str(e)}
 
     # ── SR-3.2: 이벤트 로그 검색/조회 API ─────────────────────────
 

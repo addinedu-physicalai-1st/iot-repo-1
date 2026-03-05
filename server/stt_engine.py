@@ -788,6 +788,34 @@ class STTEngine:
         if self._stats.success % 10 == 0:
             self._d("DBG-STAT", self._stats.report(), level="info")
 
+    async def transcribe_audio(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+        """
+        오디오 → Whisper 전사 (브라우저 마이크 등 외부 입력용)
+        audio: float32 [-1,1] 또는 int16
+        sample_rate: 입력 샘플레이트 (16kHz가 아니면 리샘플링)
+        """
+        if audio is None or len(audio) == 0:
+            return ""
+        if self._whisper is None:
+            await self._load_models()
+        if audio.dtype == np.int16:
+            audio = audio.astype(np.float32) / 32768.0
+        elif audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        if sample_rate != SAMPLE_RATE:
+            n = int(len(audio) * SAMPLE_RATE / sample_rate)
+            audio = np.interp(
+                np.linspace(0, len(audio) - 1, n),
+                np.arange(len(audio)),
+                audio,
+            ).astype(np.float32)
+        loop = asyncio.get_event_loop()
+        raw_text, _, _ = await loop.run_in_executor(
+            None, lambda: self._run_whisper_with_debug(audio)
+        )
+        text, _ = self._clean_text_debug(raw_text)
+        return text.strip()
+
     def _run_whisper_with_debug(self, audio: np.ndarray) -> tuple[str, float, float]:
         """NR + Whisper 동기 실행. 반환: (raw_text, nr_ms, whisper_ms). OpenAI whisper 사용."""
         audio_nr, nr_ms = self._apply_noise_reduction(audio)

@@ -253,7 +253,7 @@ def create_app() -> FastAPI:
         _stt = cfg.get("stt", {})
         stt_engine = STTEngine(
             on_result              = _make_stt_callback(command_router, ws_hub, tts_engine, db_logger),
-            on_wake                = _make_wake_callback(ws_hub),
+            on_wake                = _make_wake_callback(ws_hub, tts_engine),
             on_timeout             = _make_timeout_callback(ws_hub),
             model_size             = _stt.get("model_size", "base"),
             language               = _stt.get("language", "ko"),
@@ -687,9 +687,12 @@ def _extract_tts_response(result) -> str | None:
         return None
 
 
-def _make_wake_callback(ws_hub: WebSocketHub):
-    """웨이크 워드 감지 콜백"""
+def _make_wake_callback(ws_hub: WebSocketHub, tts_engine: TTSEngine | None = None):
+    """웨이크 워드 감지 콜백 — TTS 재생 중이면 즉시 중지"""
     async def on_wake():
+        if tts_engine and tts_engine.is_speaking:
+            tts_engine.stop()
+            logger.info("[Pipeline] 웨이크 워드 감지 → TTS 재생 중지")
         logger.info("[Pipeline] 웨이크 워드 감지 → UI 알림")
         await ws_hub.broadcast(
             '{"type":"wake_detected","msg":"자비스야 감지됨 - 명령을 말씀하세요"}'

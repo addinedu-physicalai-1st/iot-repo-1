@@ -205,6 +205,11 @@ cython_debug/
 esp32/config.h
 esp32/*/config.h
 
+# nginx SSL 인증서 및 로그
+nginx/ssl/*.pem
+nginx/ssl/openssl.cnf
+nginx/logs/
+
 # Large model files
 models/kokoro-v0_19.onnx
 
