@@ -79,16 +79,17 @@ class CommandResponse(BaseModel):
 # 라우터 팩토리
 # ─────────────────────────────────────────────
 
-def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRouter:
+def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_manager=None) -> APIRouter:
     """
     APIRouter 생성 및 엔드포인트 등록
 
     Parameters
     ----------
-    tcp_server      : TCPServer 인스턴스
-    ws_hub          : WebSocketHub 인스턴스
-    command_router  : CommandRouter 인스턴스
-    db_logger       : DBLogger 인스턴스 (선택)
+    tcp_server          : TCPServer 인스턴스
+    ws_hub              : WebSocketHub 인스턴스
+    command_router      : CommandRouter 인스턴스
+    db_logger           : DBLogger 인스턴스 (선택)
+    smartgate_manager   : SmartGateManager 인스턴스 (선택, v1.5)
     """
     router = APIRouter()
 
@@ -459,5 +460,149 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRout
             item["media"] = media
 
         return item
+
+    # ── v1.5: SmartGate 엔드포인트 ──────────────────────────────────
+
+    @router.get("/smartgate/status")
+    async def smartgate_status():
+        """SmartGate 2FA 현재 상태 조회"""
+        if smartgate_manager is None:
+            return {"enabled": False, "msg": "SmartGate 비활성화 (DISABLE_SMARTGATE=1 또는 미초기화)"}
+        return smartgate_manager.status
+
+    @router.post("/smartgate/reload-faces", response_model=CommandResponse)
+    async def smartgate_reload_faces():
+        """등록 얼굴 DB 재임베딩 트리거"""
+        if smartgate_manager is None:
+            return CommandResponse(status="warn", msg="SmartGate 비활성화 상태")
+        try:
+            smartgate_manager.face_auth.reload_faces()
+            return CommandResponse(status="ok", msg="얼굴 DB 재임베딩 완료")
+        except Exception as e:
+            logger.error(f"[SmartGate] reload-faces 오류: {e}")
+            return CommandResponse(status="fail", msg=str(e))
+
+    @router.post("/smartgate/arm")
+    async def smartgate_arm():
+        """SmartGate 인증 시작 (IDLE → ARMED)"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+        return await smartgate_manager.arm()
+
+    @router.post("/smartgate/disarm")
+    async def smartgate_disarm():
+        """SmartGate 인증 취소 (ARMED → IDLE)"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+        return await smartgate_manager.disarm()
+
+    # ── v1.9: 얼굴 등록 엔드포인트 ──────────────────────────────────
+
+    @router.post("/smartgate/register-face")
+    async def smartgate_register_face(request: Request):
+        """현재 카메라 프레임에서 얼굴을 캡처하여 face_db에 저장"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+
+        try:
+            body = await request.json()
+        except Exception:
+            return {"status": "fail", "msg": "invalid JSON"}
+
+        name = (body.get("name") or "").strip().lower()
+        if not name:
+            return {"status": "fail", "msg": "사용자 이름을 입력하세요"}
+
+        import re
+        if not re.match(r'^[\w가-힣]+$', name):
+            return {"status": "fail", "msg": "이름은 영문/한글/숫자만 가능합니다"}
+
+        try:
+            from server.camera_stream import get_latest_jpeg
+            jpeg_bytes = get_latest_jpeg()
+        except ImportError:
+            return {"status": "fail", "msg": "camera_stream 모듈 없음"}
+
+        if jpeg_bytes is None:
+            return {"status": "fail", "msg": "카메라 프레임 없음 — 스트림이 활성 상태인지 확인하세요"}
+
+        import numpy as np
+        arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return {"status": "fail", "msg": "프레임 디코드 실패"}
+
+        faces = smartgate_manager.face_auth._app.get(frame)
+        if len(faces) == 0:
+            return {"status": "fail", "msg": "얼굴이 감지되지 않았습니다. 카메라를 바라보고 다시 시도하세요"}
+        if len(faces) > 1:
+            return {"status": "fail", "msg": f"얼굴이 {len(faces)}개 감지됨 — 1명만 촬영하세요"}
+
+        face_db_dir = Path(smartgate_manager.face_auth.face_db_dir)
+        user_dir = face_db_dir / "known" / name
+        user_dir.mkdir(parents=True, exist_ok=True)
+
+        existing = list(user_dir.glob("*.jpg")) + list(user_dir.glob("*.png"))
+        next_idx = len(existing) + 1
+        save_path = user_dir / f"{next_idx:03d}.jpg"
+
+        cv2.imwrite(str(save_path), frame)
+        logger.info(f"[SmartGate] 📸 얼굴 등록: {name} → {save_path} (총 {next_idx}장)")
+
+        cache_path = face_db_dir / "encodings.pkl"
+        if cache_path.exists():
+            cache_path.unlink()
+            logger.info("[SmartGate] encodings.pkl 초기화 → 다음 reload 시 재임베딩")
+
+        return {
+            "status": "ok",
+            "msg": f"✅ {name} 얼굴 등록 완료 ({next_idx}장)",
+            "name": name,
+            "count": next_idx,
+            "path": str(save_path),
+        }
+
+    @router.get("/smartgate/registered-faces")
+    async def smartgate_registered_faces():
+        """등록된 얼굴 사용자 목록 + 이미지 수 조회"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+
+        face_db_dir = Path(smartgate_manager.face_auth.face_db_dir)
+        known_dir = face_db_dir / "known"
+
+        if not known_dir.exists():
+            return {"users": [], "total": 0}
+
+        users = []
+        for user_dir in sorted(known_dir.iterdir()):
+            if user_dir.is_dir():
+                imgs = list(user_dir.glob("*.jpg")) + list(user_dir.glob("*.png"))
+                users.append({"name": user_dir.name, "count": len(imgs)})
+
+        return {"users": users, "total": len(users)}
+
+    @router.delete("/smartgate/registered-faces/{name}")
+    async def smartgate_delete_face(name: str):
+        """특정 사용자의 등록 얼굴 전체 삭제"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+
+        import shutil
+        face_db_dir = Path(smartgate_manager.face_auth.face_db_dir)
+        user_dir = face_db_dir / "known" / name
+
+        if not user_dir.exists():
+            return {"status": "fail", "msg": f"'{name}' 사용자 없음"}
+
+        count = len(list(user_dir.glob("*.jpg")) + list(user_dir.glob("*.png")))
+        shutil.rmtree(str(user_dir))
+        logger.info(f"[SmartGate] 🗑️ 얼굴 삭제: {name} ({count}장)")
+
+        cache_path = face_db_dir / "encodings.pkl"
+        if cache_path.exists():
+            cache_path.unlink()
+
+        return {"status": "ok", "msg": f"'{name}' 삭제 완료 ({count}장)", "name": name}
 
     return router

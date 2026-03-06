@@ -614,6 +614,7 @@ void sendSensorData(float temp, const char* room) {
 // ================================================================
 
 /* ── cmdLed (비활성) ─────────────────────────────────────────────
+/* ── cmdLed (비활성) ─────────────────────────────────────────────
 void cmdLed(int pin, bool on, const char* room) {
   digitalWrite(pin, on ? HIGH : LOW);
   Serial.printf("[LED] %s GPIO%d → %s\n", room, pin, on ? "ON" : "OFF");

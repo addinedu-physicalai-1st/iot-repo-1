@@ -383,6 +383,149 @@ header {
   border-color:var(--yellow); color:var(--yellow);
 }
 
+/* ── SmartGate 오버레이 (v1.7) ── */
+.sg-overlay {
+
+  display:none;
+  position:absolute; top:0; left:0; right:0; bottom:0;
+  pointer-events:none; z-index:20;
+  transition:opacity 0.3s;
+}
+.sg-overlay.active { display:flex; flex-direction:column; }
+
+.sg-overlay-banner {
+  padding:8px 12px;
+  font-family:var(--font-mono); font-size:0.7rem;
+  font-weight:700; letter-spacing:0.1em;
+  color:#fff;
+}
+.sg-overlay-banner.liveness  { background:rgba(100,30,140,0.85); }
+.sg-overlay-banner.face-ok   { background:rgba(0,120,60,0.85); }
+.sg-overlay-banner.gesture-ok{ background:rgba(0,160,0,0.9); }
+.sg-overlay-banner.locked    { background:rgba(160,0,0,0.85); }
+
+.sg-overlay-msg {
+  padding:4px 12px;
+  font-family:var(--font-mono); font-size:0.65rem;
+  color:rgba(255,255,255,0.9);
+  background:rgba(0,0,0,0.5);
+}
+
+.sg-overlay-challenge {
+  position:absolute; bottom:32px; left:0; right:0;
+  text-align:center;
+  font-family:var(--font-main); font-size:1.1rem;
+  font-weight:700; color:#fff;
+  text-shadow:0 0 12px rgba(160,80,255,0.8);
+  animation:sg-pulse 1.5s ease-in-out infinite;
+}
+@keyframes sg-pulse {
+  0%,100%{opacity:1} 50%{opacity:0.6}
+}
+
+.sg-overlay-user {
+  position:absolute; bottom:8px; left:12px;
+  font-family:var(--font-mono); font-size:0.6rem;
+  color:rgba(100,200,255,0.8);
+}
+
+.sg-overlay-success {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  flex-direction:column;
+  background:rgba(0,160,0,0.3);
+}
+.sg-overlay-success .sg-success-icon { font-size:2.5rem; }
+.sg-overlay-success .sg-success-text {
+  font-size:1rem; font-weight:700; color:#fff;
+  margin-top:4px; letter-spacing:0.1em;
+}
+
+.sg-overlay-locked {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  flex-direction:column;
+  background:rgba(160,0,0,0.3);
+}
+.sg-overlay-locked .sg-lock-icon { font-size:2rem; }
+.sg-overlay-locked .sg-lock-text {
+  font-size:0.85rem; font-weight:700; color:rgba(255,100,100,0.9);
+  margin-top:4px;
+}
+/* ── SmartGate ARM 버튼 ── */
+.cam-btn-arm {
+  padding:4px 12px; border:1px solid #6c5ce7; border-radius:4px;
+  background:#6c5ce7; color:#fff; font-size:0.82rem; cursor:pointer;
+  transition: all 0.2s;
+}
+.cam-btn-arm:hover { background:#5a4bd1; }
+.cam-btn-arm.armed {
+  background:#e74c3c; border-color:#e74c3c; animation: sg-pulse 1.5s infinite;
+}
+@keyframes sg-pulse {
+  0%,100% { opacity:1; } 50% { opacity:0.7; }
+}
+/* ── SmartGate 얼굴 등록 ── */
+.cam-btn-register {
+  padding:4px 12px; border:1px solid #00b894; border-radius:4px;
+  background:#00b894; color:#fff; font-size:0.82rem; cursor:pointer;
+  transition: all 0.2s;
+}
+.cam-btn-register:hover { background:#00a381; }
+.sg-register-modal {
+  display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,0.6); z-index:9999;
+  align-items:center; justify-content:center;
+}
+.sg-register-modal.active { display:flex; }
+.sg-register-content {
+  background:#1a1d23; border:1px solid #333; border-radius:12px;
+  width:380px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.5);
+}
+.sg-register-header {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:14px 18px; border-bottom:1px solid #333;
+  font-size:0.95rem; font-weight:700; color:#e0e0e0;
+}
+.sg-register-close {
+  background:none; border:none; color:#888; font-size:1.1rem; cursor:pointer;
+}
+.sg-register-close:hover { color:#e74c3c; }
+.sg-register-body { padding:16px 18px; }
+.sg-register-input-row {
+  display:flex; align-items:center; gap:10px; margin-bottom:12px;
+}
+.sg-register-input-row label { color:#aaa; font-size:0.82rem; white-space:nowrap; }
+.sg-register-input-row input {
+  flex:1; padding:6px 10px; background:#12141a; border:1px solid #444;
+  border-radius:6px; color:#fff; font-size:0.85rem; outline:none;
+}
+.sg-register-input-row input:focus { border-color:#6c5ce7; }
+.sg-register-info {
+  color:#aaa; font-size:0.8rem; margin-bottom:10px; min-height:20px;
+}
+.sg-register-info.ok { color:#00b894; }
+.sg-register-info.fail { color:#e74c3c; }
+.sg-register-count { color:#6c5ce7; font-size:0.82rem; margin-bottom:10px; }
+.sg-register-actions { display:flex; gap:8px; margin-bottom:14px; }
+.sg-btn-capture {
+  flex:1; padding:8px; border:none; border-radius:6px;
+  background:#6c5ce7; color:#fff; font-size:0.85rem; cursor:pointer;
+}
+.sg-btn-capture:hover { background:#5a4bd1; }
+.sg-btn-reload {
+  padding:8px 14px; border:1px solid #555; border-radius:6px;
+  background:transparent; color:#ccc; font-size:0.85rem; cursor:pointer;
+}
+.sg-btn-reload:hover { background:#2a2d33; }
+.sg-register-list { border-top:1px solid #333; padding-top:10px; }
+.sg-user-row {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:6px 0; font-size:0.82rem; color:#ccc;
+}
+.sg-user-row .sg-user-del {
+  background:none; border:none; color:#e74c3c; cursor:pointer; font-size:0.8rem;
+}
+.sg-user-row .sg-user-del:hover { text-decoration:underline; }
+
 /* ── 우측 패널 ── */
 .side-panel {
   display:flex; flex-direction:column; gap:14px;
@@ -681,6 +824,13 @@ header {
 .cam-info-row {
   display:flex; justify-content:space-between; align-items:center;
   margin-bottom:8px;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.cam-raw-toggle {
+  font-size:0.7rem; color:var(--text2);
+  cursor:pointer; user-select:none;
+  display:flex; align-items:center; gap:5px;
 }
 .cam-status-wrap {
   display:flex; align-items:center; gap:6px;
@@ -1689,6 +1839,8 @@ header {
                style="display:none;"
                onerror="onCamError()" onload="onCamLoad()">
           <div class="cam-verdict-badge" id="camVerdictBadge"></div>
+          <!-- v1.7: SmartGate 오버레이 -->
+          <div class="sg-overlay" id="sgOverlay"></div>
           <div class="cam-rec-dot" id="camRecDot">
             <span class="cam-rec-blink">●</span> LIVE
           </div>
@@ -1696,8 +1848,13 @@ header {
 
         <!-- 하단 정보바 -->
         <div class="cam-info-row">
+          <label class="cam-raw-toggle" title="지연 최소: 재인코딩 없이 원본 전송">
+            <input type="checkbox" id="camRawMode" onchange="camRawModeChange()"> 지연 최소
+          </label>
           <button class="cam-btn-snapshot" onclick="camSnapshot()">📸 스냅샷</button>
           <button class="cam-btn-snapshot" onclick="camToggleStream()" id="camToggleBtn">▶ 스트림 시작</button>
+          <button class="cam-btn-arm" id="sgArmBtn" onclick="sgToggleArm()">🔓 인증 시작</button>
+          <button class="cam-btn-register" onclick="sgOpenRegisterModal()">👤 얼굴 등록</button>
         </div>
         <div class="cam-last-event" id="camLastEvent">마지막 이벤트: —</div>
       </div>
@@ -2116,6 +2273,12 @@ function handleServerMsg(data) {
   }
   else if (type === 'cam_verdict') {
     handleCamVerdict(data);
+  }
+  else if (type === 'smartgate_overlay') {
+    handleSmartGateOverlay(data);
+  }
+  else if (type === 'smartgate') {
+    handleSmartGateEvent(data);
   }
   else if (type === 'bathroom_temp_set') {
     setBathroomTempDisplay(data.value);
@@ -3861,6 +4024,10 @@ window.onload = () => {
   loadYouTubeAPI();
   drawHouse();  // 3D 하우스 초기 렌더링
 
+  // 카메라 지연 최소 모드 복원
+  const rawEl = document.getElementById('camRawMode');
+  if (rawEl && localStorage.getItem('cam_raw_mode') === '1') rawEl.checked = true;
+
   // localStorage 백업에서 PIR 모드 즉시 복원 (서버 응답 전 UI 선반영)
   const savedMode = localStorage.getItem('pir_mode');
   if (savedMode && PIR_MODE_CONFIG[savedMode]) {
@@ -3916,6 +4083,19 @@ function showToast(msg, type = 'ok', duration = 3000) {
 // 현관 ESP32-CAM 카메라 모듈
 // ════════════════════════════════════════════
 let _camStreaming  = false;
+
+function camStreamUrl() {
+  return document.getElementById('camRawMode')?.checked
+    ? '/camera/entrance/raw'
+    : '/camera/entrance/stream';
+}
+
+function camRawModeChange() {
+  if (!_camStreaming) return;
+  const img = document.getElementById('camStream');
+  if (img) img.src = camStreamUrl() + '?' + Date.now();
+  localStorage.setItem('cam_raw_mode', document.getElementById('camRawMode')?.checked ? '1' : '0');
+}
 let _camAlarmOsc  = null;
 let _audioCtx     = null;
 
@@ -3943,7 +4123,7 @@ function camToggleStream() {
   } else {
     ph.style.display  = 'none';
     img.style.display = 'block';
-    img.src = '/camera/entrance/stream?' + Date.now();
+    img.src = camStreamUrl() + '?' + Date.now();
     btn.textContent = '■ 스트림 중지';
     _camStreaming = true;
     showToast('📷 현관 카메라 스트림 연결 중...', 'cam', 2500);
@@ -3969,7 +4149,7 @@ function onCamError() {
   if (_camStreaming) {
     setTimeout(() => {
       const img = document.getElementById('camStream');
-      img.src = '/camera/entrance/stream?' + Date.now();
+      img.src = camStreamUrl() + '?' + Date.now();
     }, 5000);
   }
 }
@@ -4183,9 +4363,273 @@ function playDeliveryBeep() {
   osc.start();
   osc.stop(ctx.currentTime + 0.5);
 }
+// ════ SMARTGATE OVERLAY MODULE (v1.8) ═════════
+const _sgChallengeText = {
+  blink:      '👀 눈을 깜빡이세요',
+  yaw:        '↔️ 고개를 좌우로 돌리세요',
+  nod:        '↕️ 고개를 끄덕이세요',
+  mouth_open: '😮 입을 크게 벌리세요',
+};
+
+let _sgArmed = false;
+
+async function sgToggleArm() {
+  const btn = document.getElementById('sgArmBtn');
+  if (!_sgArmed) {
+    try {
+      const res = await fetch('/smartgate/arm', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        _sgArmed = true;
+        btn.textContent = '🔴 인증 취소';
+        btn.classList.add('armed');
+        log('🟢 [SmartGate] 인증 시작 — 카메라를 바라보세요', 'ok');
+        showToast('🔐 SmartGate 인증 시작 — 카메라를 바라보세요', 'ok', 3000);
+      } else {
+        log('⚠️ [SmartGate] ' + (data.msg || 'ARM 실패'), 'fail');
+        showToast(data.msg || 'ARM 실패', 'fail', 3000);
+      }
+    } catch (e) {
+      log('⚠️ [SmartGate] ARM 요청 실패', 'fail');
+    }
+  } else {
+    try {
+      const res = await fetch('/smartgate/disarm', { method: 'POST' });
+      const data = await res.json();
+      _sgArmed = false;
+      btn.textContent = '🔓 인증 시작';
+      btn.classList.remove('armed');
+      log('🔴 [SmartGate] 인증 취소', 'info');
+    } catch (e) {
+      log('⚠️ [SmartGate] DISARM 요청 실패', 'fail');
+    }
+  }
+}
+
+function _sgResetArmBtn() {
+  _sgArmed = false;
+  const btn = document.getElementById('sgArmBtn');
+  if (btn) {
+    btn.textContent = '🔓 인증 시작';
+    btn.classList.remove('armed');
+  }
+}
+
+function handleSmartGateOverlay(data) {
+  const overlay = document.getElementById('sgOverlay');
+  const state   = data.state || 'IDLE';
+
+  if (state === 'IDLE') {
+    overlay.classList.remove('active');
+    overlay.innerHTML = '';
+    _sgResetArmBtn();
+    return;
+  }
+
+  overlay.classList.add('active');
+  overlay.innerHTML = '';
+
+  const bannerDiv = document.createElement('div');
+  bannerDiv.className = 'sg-overlay-banner';
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'sg-overlay-msg';
+  const challengeDiv = document.createElement('div');
+  challengeDiv.className = 'sg-overlay-challenge';
+  const userDiv = document.createElement('div');
+  userDiv.className = 'sg-overlay-user';
+
+  if (state === 'ARMED') {
+    bannerDiv.classList.add('liveness');
+    bannerDiv.textContent = '🔐 스마트게이트 — 인증 준비';
+    msgDiv.textContent = '카메라를 정면으로 바라봐 주세요';
+    challengeDiv.textContent = '📷 얼굴 인식 대기 중...';
+    overlay.append(bannerDiv, msgDiv, challengeDiv);
+  }
+  else if (state === 'LIVENESS') {
+    bannerDiv.classList.add('liveness');
+    bannerDiv.textContent = '🔐 스마트게이트 — 생체 인증';
+    msgDiv.textContent = data.msg || '챌린지 진행 중...';
+    const ch = data.challenge || '';
+    challengeDiv.textContent = _sgChallengeText[ch] || ch;
+    if (data.user) userDiv.textContent = 'User: ' + data.user;
+    overlay.append(bannerDiv, msgDiv, challengeDiv, userDiv);
+  }
+  else if (state === 'FACE_OK') {
+    bannerDiv.classList.add('face-ok');
+    bannerDiv.textContent = '✋ 스마트게이트 — 제스처 인증';
+    const seq = data.sequence || [];
+    msgDiv.textContent = '시퀀스: [' + seq.join(' → ') + ']';
+    challengeDiv.textContent = '🖐️ 손가락 수신호를 보여주세요';
+    if (data.user) userDiv.textContent = 'User: ' + data.user;
+    overlay.append(bannerDiv, msgDiv, challengeDiv, userDiv);
+  }
+  else if (state === 'GESTURE_OK') {
+    bannerDiv.classList.add('gesture-ok');
+    bannerDiv.textContent = '✅ 인증 성공';
+    const successDiv = document.createElement('div');
+    successDiv.className = 'sg-overlay-success';
+    successDiv.innerHTML =
+      '<div class="sg-success-icon">🚪</div>' +
+      '<div class="sg-success-text">' +
+      (data.user ? data.user + '님, 환영합니다!' : '인증 성공') +
+      '</div>';
+    overlay.append(bannerDiv, successDiv);
+  }
+  else if (state === 'LOCKED') {
+    bannerDiv.classList.add('locked');
+    bannerDiv.textContent = '🚫 접근 거부';
+    const lockDiv = document.createElement('div');
+    lockDiv.className = 'sg-overlay-locked';
+    lockDiv.innerHTML =
+      '<div class="sg-lock-icon">🔒</div>' +
+      '<div class="sg-lock-text">' + (data.msg || '잠금 상태') + '</div>';
+    overlay.append(bannerDiv, lockDiv);
+  }
+}
+
+function handleSmartGateEvent(data) {
+  const event = data.event || '';
+  const ts = new Date((data.timestamp || Date.now()/1000) * 1000)
+               .toLocaleTimeString('ko-KR', {hour12:false});
+
+  if (event === 'armed') {
+    log('🟢 [SmartGate] 인증 준비 — ' + (data.timeout_sec || 30) + '초 내 카메라를 바라보세요', 'ok');
+  }
+  else if (event === 'disarmed') {
+    log('🔴 [SmartGate] 인증 취소', 'info');
+    _sgResetArmBtn();
+  }
+  else if (event === 'arm_timeout') {
+    log('⏰ [SmartGate] 인증 대기 타임아웃 → 대기 모드', 'info');
+    showToast('⏰ SmartGate 인증 대기 시간 초과', 'fail', 3000);
+    _sgResetArmBtn();
+  }
+  else if (event === 'face_ok') {
+    log('🔐 [SmartGate] 얼굴 인식: ' + (data.user || '') +
+        ' (sim=' + (data.similarity || 0) + ')', 'ok');
+  }
+  else if (event === 'liveness_fail') {
+    log('❌ [SmartGate] Liveness 실패: ' + (data.msg || '타임아웃'), 'fail');
+  }
+  else if (event === 'auth_success') {
+    log('✅ [SmartGate] 2FA 인증 성공! 사용자: ' + (data.user || '') +
+        ' | 시퀀스: [' + (data.sequence || []).join(',') + ']', 'ok');
+    showToast('🚪 SmartGate 인증 성공 — 현관문 열림', 'ok', 4000);
+    document.getElementById('camLastEvent').textContent =
+      '마지막: 🚪 SmartGate 인증 성공 (' + ts + ')';
+  }
+  else if (event === 'gate_open') {
+    log('🚪 [SmartGate] 게이트 열림 — ' + (data.open_duration_sec || 5) + '초 후 자동 닫힘', 'ok');
+  }
+  else if (event === 'lockout_start') {
+    log('🔒 [SmartGate] 잠금! ' + (data.lockout_sec || 30) + '초 대기', 'fail');
+    showToast('🔒 SmartGate 잠금 — 연속 실패', 'fail', 5000);
+    document.getElementById('camLastEvent').textContent =
+      '마지막: 🔒 SmartGate 잠금 (' + ts + ')';
+  }
+  else if (event === 'gate_closed') {
+    log('🚪 [SmartGate] 게이트 닫힘 — 대기 모드', 'info');
+    _sgResetArmBtn();
+    // 오버레이 초기화
+    const overlay = document.getElementById('sgOverlay');
+    if (overlay) { overlay.classList.remove('active'); overlay.innerHTML = ''; }
+  }
+  else if (event === 'welcome_triggered') {
+    log('🏠 [SmartGate] 환영! ' + (data.user || '') + '님 귀가 — 조명 ON + TTS', 'ok');
+    showToast('🏠 ' + (data.user || '사용자') + '님 어서오세요!', 'ok', 4000);
+  }
+}
+// ════ END SMARTGATE MODULE ═══════════════════
+
+// ════ SMARTGATE FACE REGISTER MODULE (v1.9) ═══
+async function sgOpenRegisterModal() {
+  document.getElementById('sgRegisterModal').classList.add('active');
+  document.getElementById('sgRegName').value = '';
+  document.getElementById('sgRegInfo').textContent = '카메라를 바라보고 캡처 버튼을 누르세요.';
+  document.getElementById('sgRegInfo').className = 'sg-register-info';
+  document.getElementById('sgRegCount').textContent = '';
+  await sgLoadRegisteredFaces();
+}
+function sgCloseRegisterModal() {
+  document.getElementById('sgRegisterModal').classList.remove('active');
+}
+async function sgCaptureFace() {
+  const name = document.getElementById('sgRegName').value.trim();
+  const info = document.getElementById('sgRegInfo');
+  if (!name) { info.textContent='\u26a0\ufe0f 사용자 이름을 입력하세요'; info.className='sg-register-info fail'; return; }
+  info.textContent='\ud83d\udcf8 캡처 중...'; info.className='sg-register-info';
+  try {
+    const res = await fetch('/smartgate/register-face', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name}) });
+    const data = await res.json();
+    if (data.status==='ok') {
+      info.textContent=data.msg; info.className='sg-register-info ok';
+      document.getElementById('sgRegCount').textContent='등록 이미지: '+data.count+'장';
+      log('\ud83d\udcf8 [SmartGate] 얼굴 등록: '+data.name+' ('+data.count+'장)','ok');
+      await sgLoadRegisteredFaces();
+    } else { info.textContent='\u274c '+(data.msg||'등록 실패'); info.className='sg-register-info fail'; }
+  } catch(e) { info.textContent='\u274c 서버 연결 실패'; info.className='sg-register-info fail'; }
+}
+async function sgReloadFaces() {
+  const info = document.getElementById('sgRegInfo');
+  info.textContent='\ud83d\udd04 재임베딩 중...'; info.className='sg-register-info';
+  try {
+    const res = await fetch('/smartgate/reload-faces',{method:'POST'});
+    const data = await res.json();
+    info.textContent='\u2705 '+(data.msg||'재임베딩 완료'); info.className='sg-register-info ok';
+    log('\ud83d\udd04 [SmartGate] 얼굴 DB 재임베딩 완료','ok');
+  } catch(e) { info.textContent='\u274c 재임베딩 실패'; info.className='sg-register-info fail'; }
+}
+async function sgLoadRegisteredFaces() {
+  const listDiv = document.getElementById('sgRegList');
+  try {
+    const res = await fetch('/smartgate/registered-faces');
+    const data = await res.json();
+    if (!data.users||data.users.length===0) { listDiv.innerHTML='<div style="color:#666;font-size:0.8rem;">등록된 사용자 없음</div>'; return; }
+    listDiv.innerHTML = data.users.map(function(u){
+      return '<div class="sg-user-row"><span>\ud83d\udc64 '+u.name+' ('+u.count+'장)</span>'+
+        '<button class="sg-user-del" onclick="sgDeleteFace(\''+u.name+'\')">삭제</button></div>';
+    }).join('');
+  } catch(e) { listDiv.innerHTML='<div style="color:#e74c3c;font-size:0.8rem;">목록 로드 실패</div>'; }
+}
+async function sgDeleteFace(name) {
+  if (!confirm(name+' 사용자의 등록 얼굴을 모두 삭제하시겠습니까?')) return;
+  try {
+    const res = await fetch('/smartgate/registered-faces/'+name,{method:'DELETE'});
+    const data = await res.json();
+    if (data.status==='ok') { log('\ud83d\uddd1\ufe0f [SmartGate] 얼굴 삭제: '+name,'info'); showToast('\ud83d\uddd1\ufe0f '+name+' 삭제 완료','ok',3000); await sgLoadRegisteredFaces(); }
+    else { showToast(data.msg||'삭제 실패','fail',3000); }
+  } catch(e) { showToast('서버 연결 실패','fail',3000); }
+}
+// ════ END FACE REGISTER MODULE ═══════════════
+
 // ════ END CAM MODULE ═══════════════════════════
 </script>
 
 <div class="toast-container" id="toastContainer"></div>
+
+<!-- SmartGate 얼굴 등록 모달 -->
+<div class="sg-register-modal" id="sgRegisterModal">
+  <div class="sg-register-content">
+    <div class="sg-register-header">
+      <span>👤 SmartGate 얼굴 등록</span>
+      <button class="sg-register-close" onclick="sgCloseRegisterModal()">✕</button>
+    </div>
+    <div class="sg-register-body">
+      <div class="sg-register-input-row">
+        <label>사용자 이름</label>
+        <input type="text" id="sgRegName" placeholder="예: stephen" autocomplete="off">
+      </div>
+      <div class="sg-register-info" id="sgRegInfo">
+        카메라를 바라보고 캡처 버튼을 누르세요.
+      </div>
+      <div class="sg-register-count" id="sgRegCount"></div>
+      <div class="sg-register-actions">
+        <button class="sg-btn-capture" onclick="sgCaptureFace()">📸 캡처</button>
+        <button class="sg-btn-reload" onclick="sgReloadFaces()">🔄 재임베딩</button>
+      </div>
+      <div class="sg-register-list" id="sgRegList"></div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

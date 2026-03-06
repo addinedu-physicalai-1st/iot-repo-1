@@ -6,12 +6,15 @@
 #   ./run_server.sh                              # 전체 기능 실행
 #   DISABLE_STT=1 DISABLE_TTS=1 ./run_server.sh  # STT/TTS 없이 실행
 #   DISABLE_DB=1 ./run_server.sh                 # MySQL 로깅 없이 실행
+#   DISABLE_SMARTGATE=1 ./run_server.sh          # SmartGate 2FA 없이 실행
 #
 # 환경 변수:
 #   .env 파일에서 민감정보 자동 로드 (cp .env_example .env)
-#   DISABLE_STT=1  : STT/웨이크워드 비활성화
-#   DISABLE_TTS=1  : TTS 비활성화
-#   DISABLE_DB=1   : MySQL 이벤트 로깅 비활성화
+#   DISABLE_STT=1       : STT/웨이크워드 비활성화
+#   DISABLE_TTS=1       : TTS 비활성화
+#   DISABLE_DB=1        : MySQL 이벤트 로깅 비활성화
+#   DISABLE_CAM=1       : ESP32-CAM 카메라 비활성화
+#   DISABLE_SMARTGATE=1 : SmartGate 2FA 비활성화
 #
 # 포트:
 #   8000 : FastAPI (HTTP + WebSocket)
@@ -74,6 +77,13 @@ if [ -z "$DISABLE_DB" ]; then
     else
         echo "경고: mysql 클라이언트 없음 — DB 연결 확인 스킵"
     fi
+fi
+
+# SmartGate 상태 표시
+if [ -n "$DISABLE_SMARTGATE" ]; then
+    echo "SmartGate 2FA: 비활성화 (DISABLE_SMARTGATE=1)"
+else
+    echo "SmartGate 2FA: 활성화"
 fi
 
 echo ""
