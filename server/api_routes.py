@@ -194,13 +194,11 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_
           버튼 클릭 → 즉시 LISTENING
           "헤이 IoT" 발화 → 자동 LISTENING
         """
-        import sys
-        stt = None
-        for mod in sys.modules.values():
-            app = getattr(mod, 'app', None)
-            if app and hasattr(getattr(app, 'state', None), 'stt_engine'):
-                stt = app.state.stt_engine
-                break
+        try:
+            from server.main import app
+            stt = getattr(app.state, 'stt_engine', None)
+        except Exception:
+            stt = None
 
         if stt is None:
             return CommandResponse(
@@ -220,21 +218,19 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_
         return CommandResponse(status="ok", msg="STT LISTENING 활성화")
 
     def _get_stt_state():
-        import sys
-        for mod in sys.modules.values():
-            app = getattr(mod, 'app', None)
-            if app and hasattr(getattr(app, 'state', None), 'stt_engine'):
-                stt = app.state.stt_engine
-                return getattr(stt, 'state', 'N/A') if stt else 'DISABLED'
-        return 'N/A'
+        try:
+            from server.main import app
+            stt = getattr(app.state, 'stt_engine', None)
+            return getattr(stt, 'state', 'N/A') if stt else 'DISABLED'
+        except Exception:
+            return 'N/A'
 
     def _get_stt_engine():
-        import sys
-        for mod in sys.modules.values():
-            app = getattr(mod, 'app', None)
-            if app and hasattr(getattr(app, 'state', None), 'stt_engine'):
-                return app.state.stt_engine
-        return None
+        try:
+            from server.main import app
+            return getattr(app.state, 'stt_engine', None)
+        except Exception:
+            return None
 
     # ── GET /stt/devices ─────────────────────────────────────────
     @router.get("/stt/devices")
@@ -316,6 +312,8 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_
             return {"text": "", "status": "warn", "msg": "STTEngine 비활성화 (DISABLE_STT=1)"}
         try:
             raw = base64.b64decode(req.audio)
+            if len(raw) < 1600:  # 0.05초 미만 (16kHz 기준)
+                raise ValueError("오디오가 너무 짧습니다 (최소 0.5초 필요)")
             audio = np.frombuffer(raw, dtype=np.int16)
             text = await stt.transcribe_audio(audio, sample_rate=req.sample_rate)
             return {"text": text, "status": "ok"}

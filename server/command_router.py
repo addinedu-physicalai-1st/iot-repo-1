@@ -96,6 +96,7 @@ WS_TYPE_MANUAL_CMD    = "manual_cmd"      # 브라우저 수동 명령
 WS_TYPE_LLM_CMD       = "llm_cmd"         # LLM 파싱 결과
 WS_TYPE_MANUAL_TRIGGER = "manual_trigger" # 버튼 모드: 서버 STT 활성화 요청
 WS_TYPE_MUSIC_STATE   = "music_state"     # 브라우저 ytPlayer 상태 보고 (v1.6)
+WS_TYPE_AUDIO_CHUNK   = "audio_chunk"     # 브라우저 마이크 오디오 스트림 (wake_source=browser)
 
 
 class CommandRouter:
@@ -164,6 +165,11 @@ class CommandRouter:
         # 브라우저 ytPlayer 상태 보고 → UnifiedStateManager 반영 (v1.6)
         elif msg_type == WS_TYPE_MUSIC_STATE:
             return await self._handle_music_state(data)
+
+        # 브라우저 마이크 오디오 스트림 (wake_source=browser 시 Porcupine/VAD용)
+        elif msg_type == WS_TYPE_AUDIO_CHUNK:
+            await self._handle_audio_chunk(data)
+            return None  # 브로드캐스트 불필요
 
         else:
             logger.warning(f"[Router] 알 수 없는 WS type: {msg_type}")
@@ -936,19 +942,38 @@ class CommandRouter:
         WS manual_trigger 처리 - STTEngine.activate() 호출
         버튼 클릭 시 WS 경로로 즉시 LISTENING 전환
         """
-        import sys
-        for mod in sys.modules.values():
-            app = getattr(mod, 'app', None)
-            if app and hasattr(getattr(app, 'state', None), 'stt_engine'):
-                stt = app.state.stt_engine
-                if stt is None:
-                    return ws_cmd_result("warn", "STTEngine 비활성화")
-                if stt.state != "IDLE":
-                    return ws_cmd_result("ok", f"STT 이미 활성화: {stt.state}")
-                stt.activate()
-                logger.info("[Router] WS 버튼 트리거 → STT LISTENING 활성화")
-                return ws_cmd_result("ok", "STT LISTENING 활성화")
-        return ws_cmd_result("warn", "STTEngine 찾을 수 없음")
+        try:
+            from server.main import app
+            stt = getattr(app.state, 'stt_engine', None)
+        except Exception:
+            stt = None
+        if stt is None:
+            return ws_cmd_result("warn", "STTEngine 비활성화")
+        if stt.state != "IDLE":
+            return ws_cmd_result("ok", f"STT 이미 활성화: {stt.state}")
+        stt.activate()
+        logger.info("[Router] WS 버튼 트리거 → STT LISTENING 활성화")
+        return ws_cmd_result("ok", "STT LISTENING 활성화")
+
+    async def _handle_audio_chunk(self, data: dict) -> None:
+        """
+        브라우저 오디오 청크 → STTEngine.feed_audio (wake_source=browser 시)
+        """
+        import base64
+        raw = data.get("data", "")
+        if not raw:
+            return
+        try:
+            chunk = base64.b64decode(raw)
+        except Exception:
+            return
+        try:
+            from server.main import app
+            stt = getattr(app.state, 'stt_engine', None)
+            if stt and getattr(stt, 'wake_source', 'server') == "browser":
+                stt.feed_audio(chunk)
+        except Exception:
+            pass
 
     async def _handle_voice(self, text: str) -> str:
         """
@@ -965,15 +990,17 @@ class CommandRouter:
         text = normalized
 
         if self._llm is None:
-            # LLM 없을 때 키워드 기반 간단 파싱 (fallback)
-            logger.info(f"[Router] LLM 없음, 키워드 fallback: {text}")
-            data = self._simple_parse(text)
-        else:
-            logger.info(f"[Router] LLM 파싱 요청: {text}")
-            data = await self._llm.parse(text)
+            logger.warning(f"[Router] LLM 비활성화 — Ollama 실행 필요: '{text}'")
+            return ws_cmd_result("warn", "Ollama가 실행되지 않았습니다. ollama serve 후 다시 시도해 주세요.")
+
+        logger.info(f"[Router] LLM 파싱 요청: {text}")
+        data = await self._llm.parse(text)
 
         if not data:
+            logger.warning(f"[Router] 명령 파싱 실패: '{text}'")
             return ws_cmd_result("unknown", f"명령을 이해하지 못했습니다: '{text}'")
+
+        logger.info(f"[Router] 음성 명령 파싱: '{text}' → cmd={data.get('cmd')} action={data.get('action')}")
 
         # DB 로그: LLM 파싱 결과 (SR-3.1)
         if self._db:
@@ -992,9 +1019,33 @@ class CommandRouter:
                 "status": "conversation",
                 "msg": "자유 대화 응답",
                 "tts_response": tts,
+                "original_text": text,
+                "display_text": text,  # 자유 대화는 원문 그대로
             }, ensure_ascii=False)
 
-        return await self.execute(data)
+        result = await self.execute(data)
+        return self._wrap_voice_result(result, text, data)
+
+    def _wrap_voice_result(self, result: str, original_text: str, parsed_data: dict) -> str:
+        """
+        voice_text 처리 결과에 original_text, display_text 추가.
+        - 성공 시: display_text = LLM 해석 결과 (오인식 교정)
+        - 실패/unknown 시: display_text 없음 → 프론트는 original_text 사용
+        """
+        try:
+            obj = _json.loads(result)
+        except Exception:
+            return result
+        if obj.get("type") != "cmd_result":
+            return result
+        obj["original_text"] = original_text
+        status = obj.get("status", "")
+        if status == "ok":
+            display = self._cmd_to_display_text(parsed_data)
+            if display:
+                obj["display_text"] = display
+        # fail/unknown/warn: display_text 없음 → 프론트는 original_text 그대로 표시
+        return _json.dumps(obj, ensure_ascii=False)
 
     def _resolve_device(self, data: dict) -> Optional[str]:
         """
@@ -1123,9 +1174,59 @@ class CommandRouter:
 
         return text
 
-    def _simple_parse(self, text: str) -> Optional[dict]:
+    def _cmd_to_display_text(self, data: dict) -> str:
         """
-        LLM 없을 때 키워드 기반 단순 파싱 (fallback)
+        실행된 명령을 사람이 읽기 쉬운 음성 명령 형태로 변환.
+        voice command 디스플레이용 (STT 오인식 시 LLM 해석 결과 표시)
+        """
+        cmd = data.get("cmd", "")
+        room = data.get("room", "")
+        room_label = ROOM_LABEL.get(room, room) if room else ""
+
+        if cmd == "set_bathroom_temp":
+            val = data.get("value")
+            if val is not None:
+                return f"욕실 난방 {float(val):.0f}도로 설정해줘"
+            return "욕실 난방 온도 설정해줘"
+        if cmd == "heating":
+            s = data.get("state", "off").lower()
+            return f"욕실 난방 {'켜줘' if s == 'on' else '꺼줘'}"
+        if cmd == CMD_LED:
+            state = data.get("state", "on").lower()
+            on_off = "켜줘" if state == "on" else "꺼줘"
+            if room_label:
+                return f"{room_label} 불 {on_off}"
+            return f"불 {on_off}"
+        if cmd == CMD_SERVO:
+            angle = data.get("angle", 0)
+            open_close = "열어줘" if angle >= 45 else "닫아줘"
+            if room == "bedroom":
+                return f"침실 커튼 {open_close}"
+            if room_label:
+                return f"{room_label} 문 {open_close}"
+            return f"커튼 {open_close}"
+        if cmd == "music":
+            action = data.get("action", "play").lower()
+            labels = {"play": "음악 켜줘", "pause": "음악 일시정지", "stop": "음악 꺼줘", "next": "다음 곡", "prev": "이전 곡"}
+            return labels.get(action, "음악 켜줘")
+        if cmd == "all_on":
+            return "전체 켜줘"
+        if cmd == "all_off":
+            return "전체 꺼줘"
+        if cmd and (cmd.startswith("pir_") or cmd.endswith("_mode")):
+            mode = cmd.replace("pir_", "").replace("_mode", "")
+            labels = {"away": "외출", "home": "귀가", "sleep": "취침", "wake": "기상", "dnd": "방해금지"}
+            return f"{labels.get(mode, mode)} 모드"
+        return ""
+
+    # ── _simple_parse 비활성화: STT 결과는 무조건 LLM 파싱 ─────────────────
+    def _simple_parse(self, text: str) -> Optional[dict]:
+        """[비활성화] STT 결과는 무조건 LLM으로 파싱"""
+        return None
+
+    def _simple_parse_disabled(self, text: str) -> Optional[dict]:
+        """
+        [비활성화] LLM 없을 때 키워드 기반 단순 파싱 (fallback)
         v2: device_id → esp32_home, room 필드 추가
         """
         text = self._normalize_stt(text.strip())
@@ -1170,6 +1271,16 @@ class CommandRouter:
             return {"cmd": "heating", "room": "bathroom", "state": "off",
                     "tts_response": "욕실 난방을 껐어요."}
 
+        # ── 음악 (LED "꺼"보다 먼저 체크) ─────────────────────────────────
+        if any(k in text for k in ["음악 틀어", "음악 틀어줘", "음악 틀어요", "음악 켜", "음악 재생", "음악 재생해", "노래 틀어", "노래 재생"]):
+            return {"cmd": "music", "action": "play"}
+        if any(k in text for k in ["음악 꺼", "음악 꺼줘", "음악 정지", "음악 멈춰", "노래 꺼"]):
+            return {"cmd": "music", "action": "pause"}
+        if any(k in text for k in ["다음 곡", "다음곡"]):
+            return {"cmd": "music", "action": "next"}
+        if any(k in text for k in ["이전 곡", "이전곡"]):
+            return {"cmd": "music", "action": "prev"}
+
         if any(k in text for k in ["켜", "켜줘", "불 켜", "조명 켜"]):
             if is_all:
                 return {"cmd": "all_on", "device_id": "all"}
@@ -1209,15 +1320,6 @@ class CommandRouter:
             return {**base, "cmd": CMD_SERVO, "angle": 90}
         if any(k in text for k in ["닫아", "닫아줘", "문 닫"]) and room:
             return {**base, "cmd": CMD_SERVO, "angle": 0}
-
-        if any(k in text for k in ["음악 틀어", "음악 켜", "음악 재생"]):
-            return {"cmd": "music", "action": "play"}
-        if any(k in text for k in ["음악 꺼", "음악 정지", "음악 멈춰"]):
-            return {"cmd": "music", "action": "pause"}
-        if any(k in text for k in ["다음 곡", "다음곡"]):
-            return {"cmd": "music", "action": "next"}
-        if any(k in text for k in ["이전 곡", "이전곡"]):
-            return {"cmd": "music", "action": "prev"}
 
         # ── PIR 모드 키워드 ───────────────────────────────────────────
         # PIR 명령은 _execute_pir_mode() 에서 pir_device(home2)로 직접 라우팅

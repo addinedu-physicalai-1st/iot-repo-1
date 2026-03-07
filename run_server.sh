@@ -28,9 +28,20 @@ cd "$(dirname "$0")"
 
 # 기존 프로세스 정리 (포트 충돌 방지)
 echo "기존 프로세스 정리 중..."
+./scripts/run_nginx.sh stop 2>/dev/null || true
 kill $(lsof -t -i:9000) 2>/dev/null || true
 kill $(lsof -t -i:8000) 2>/dev/null || true
 sleep 1
+
+# nginx 종료 트랩 (스크립트 종료 시 자동 실행)
+NGINX_STARTED=0
+cleanup_nginx() {
+  if [ "$NGINX_STARTED" = "1" ]; then
+    echo "nginx 종료 중..."
+    ./scripts/run_nginx.sh stop 2>/dev/null || true
+  fi
+}
+trap cleanup_nginx EXIT
 
 # 가상환경 자동 활성화 (.venv 존재 시)
 if [ -d ".venv" ] && [ -f ".venv/bin/activate" ]; then
@@ -88,7 +99,6 @@ fi
 
 echo ""
 echo "서버 시작 중... (TCP:9000 / HTTP+WS:8000)"
-echo "  웹 대시보드: http://localhost:8000/"
 echo ""
 
 # uvicorn 백그라운드 실행
@@ -105,9 +115,25 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 
+# nginx (HTTPS) 자동 시작 (SSL 인증서 있으면)
+DASHBOARD_URL="http://localhost:8000/"
+if [ -f "nginx/ssl/iot.pem" ] && [ -f "nginx/ssl/iot-key.pem" ]; then
+  if ./scripts/run_nginx.sh; then
+    NGINX_STARTED=1
+    DASHBOARD_URL="https://localhost/"
+    echo "  웹 대시보드: $DASHBOARD_URL (HTTPS)"
+  else
+    echo "  웹 대시보드: http://localhost:8000/ (nginx 시작 실패)"
+  fi
+else
+  echo "  웹 대시보드: http://localhost:8000/"
+  echo "  (HTTPS: ./scripts/ssl_generate_cert.sh 후 재시작)"
+fi
+echo ""
+
 # 기본 브라우저에서 대시보드 자동 열기 (Linux)
 if command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "http://localhost:8000/" >/dev/null 2>&1
+  xdg-open "$DASHBOARD_URL" >/dev/null 2>&1
 fi
 
 # uvicorn 종료 대기

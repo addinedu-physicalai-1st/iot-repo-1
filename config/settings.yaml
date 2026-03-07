@@ -79,6 +79,8 @@ stt:
   language: "ko"
   device: "cpu"
   wake_word: "자비스야"
+  # wake_source: "browser" → 웨이크워드 브라우저 마이크 | "server" → 서버 마이크 (자비스야 미작동 시 server로 변경)
+  wake_source: "server"
   porcupine_access_key: ""   # .env PORCUPINE_ACCESS_KEY 사용
   porcupine_model_path: "models/자비스야_ko_linux_v4_0_0.ppn"
   porcupine_params_path: "models/porcupine_params_ko.pv"

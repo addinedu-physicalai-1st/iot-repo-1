@@ -109,6 +109,7 @@ Available commands:
   {"cmd": "home_mode",  "device_id": "esp32_home"}  ← 귀가 (PIR 재실 감지 ON)
   {"cmd": "sleep_mode", "device_id": "esp32_home"}  ← 취침 (PIR 거실 방범 ON)
   {"cmd": "wake_mode",  "device_id": "esp32_home"}  ← 기상 (PIR 재실 감지 ON)
+  {"cmd": "dnd_mode",   "device_id": "esp32_home"}  ← 방해금지 (알람·팝업 무시, 로그 유지)
   {"cmd": "heating",             "device_id": "esp32_home", "room": "bathroom", "state": "on"|"off"}  ← 욕실 난방 ON/OFF
   {"cmd": "set_bathroom_temp",   "device_id": "esp32_home", "value": <10.0-40.0>}  ← 욕실 희망온도 설정 (자동으로 난방 ON 포함)
   {"cmd": "query_bathroom_temp", "device_id": "esp32_home"}                         ← 욕실 현재온도 조회 (센서 없음 → 희망온도 안내)
@@ -132,11 +133,12 @@ Rules:
   4. For whole-home LED: use "device_id": "all" without "room".
   4-1. For whole-home power OFF (전등+음악 동시): use cmd: "all_off", "device_id": "all".
   4-2. For whole-home lights ON (전등만): use cmd: "all_on", "device_id": "all". (음악은 포함하지 않음)
-  4-3. PIR mode keywords:
-     - 외출 / 나갈게 / 외출해           → cmd: "away_mode",  device_id: "esp32_home"
-     - 귀가 / 돌아왔어 / 집에 왔어      → cmd: "home_mode",  device_id: "esp32_home"
-     - 잘게 / 취침 / 자러 갈게          → cmd: "sleep_mode", device_id: "esp32_home"
-     - 일어났어 / 기상 / 아침이야       → cmd: "wake_mode",  device_id: "esp32_home"
+  4-3. PIR mode keywords (보안 모드 / 방범 모드):
+     - 외출 / 나갈게 / 외출해 / 외출 모드 / 보안 모드 외출     → cmd: "away_mode",  device_id: "esp32_home"
+     - 귀가 / 돌아왔어 / 집에 왔어 / 귀가 모드 / 보안 모드 귀가  → cmd: "home_mode",  device_id: "esp32_home"
+     - 잘게 / 취침 / 자러 갈게 / 취침 모드 / 보안 모드 취침     → cmd: "sleep_mode", device_id: "esp32_home"
+     - 일어났어 / 기상 / 아침이야 / 기상 모드 / 보안 모드 기상  → cmd: "wake_mode",  device_id: "esp32_home"
+     - 방해금지 / 방해금지 모드 / 보안 모드 끄기 / 알람 끄기    → cmd: "dnd_mode",   device_id: "esp32_home"
   4-4. Bathroom temperature keywords:
      - 욕실 / 목욕탕 + 온도 / 온도 설정 / 도로 맞춰줘 + <숫자>  → cmd: "set_bathroom_temp", value: <숫자>
        (set_bathroom_temp는 자동으로 난방도 ON 시킴 — heating 명령을 따로 보낼 필요 없음)
@@ -192,6 +194,9 @@ Examples:
   "귀가했어 / 집에 왔어"        → {"cmd":"home_mode","device_id":"esp32_home","tts_response":"어서 오세요! 재실 감지 모드로 전환했어요."}
   "잘게 / 취침할게"             → {"cmd":"sleep_mode","device_id":"esp32_home","tts_response":"잘 자요! 거실 방범 모드를 켰어요."}
   "일어났어 / 기상"             → {"cmd":"wake_mode","device_id":"esp32_home","tts_response":"좋은 아침이에요! 재실 감지 모드로 전환했어요."}
+  "보안 모드 외출해"            → {"cmd":"away_mode","device_id":"esp32_home","tts_response":"외출 모드로 설정했어요."}
+  "방범 모드 켜줘"              → {"cmd":"away_mode","device_id":"esp32_home","tts_response":"방범 모드를 켰어요."}
+  "방해금지 모드"               → {"cmd":"dnd_mode","device_id":"esp32_home","tts_response":"방해금지 모드로 설정했어요. 알람이 무시됩니다."}
   "욕실 온도 몇 도야?"            → {"cmd":"query_bathroom_temp","device_id":"esp32_home","tts_response":"현재 온도 센서가 없어요. 설정된 희망 온도를 알려드릴게요."}
   "욕실 25도로 설정해줘"          → {"cmd":"set_bathroom_temp","device_id":"esp32_home","value":25.0,"tts_response":"욕실 난방을 켜고 희망온도를 25도로 설정했어요."}
   "욕실 온도 28.5도"              → {"cmd":"set_bathroom_temp","device_id":"esp32_home","value":28.5,"tts_response":"욕실 난방을 켜고 희망온도를 28.5도로 설정했어요."}
@@ -293,7 +298,7 @@ class LLMEngine:
             return cmd
 
         # PIR 모드 명령 처리 (validate 우회)
-        if cmd.get("cmd") in ("away_mode", "home_mode", "sleep_mode", "wake_mode"):
+        if cmd.get("cmd") in ("away_mode", "home_mode", "sleep_mode", "wake_mode", "dnd_mode"):
             logger.info(f"[LLM] PIR 모드 명령: {cmd}")
             return cmd
 

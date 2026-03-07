@@ -192,13 +192,17 @@ def create_app() -> FastAPI:
 
     # ── 브라우저 접속 시 현재 상태 즉시 전송 ────────────────────────
     async def _on_ws_connect(client_id: str, send_fn):
-        """새 브라우저 접속 → device_list + 각 device_update 즉시 전송"""
+        """새 브라우저 접속 → device_list + 각 device_update + stt config 전송"""
+        import json as _json
         from protocol.schema import ws_device_list, ws_device_update
         devices = tcp_server.get_device_list()
         await send_fn(ws_device_list(devices))
         for d in devices:
             await send_fn(ws_device_update(d["device_id"], d["state"]))
-        logger.info(f"[WS] 접속 {client_id} → device_list {len(devices)}개 + state 전송")
+        # 웨이크워드 소스: browser=브라우저 마이크만 | server=서버 마이크
+        wake_src = cfg.get("stt", {}).get("wake_source", "server")
+        await send_fn(_json.dumps({"type": "config", "stt_wake_source": wake_src}, ensure_ascii=False))
+        logger.info(f"[WS] 접속 {client_id} → device_list {len(devices)}개 + state + stt_wake_source={wake_src}")
 
     ws_hub._on_connect = _on_ws_connect
 
@@ -271,6 +275,7 @@ def create_app() -> FastAPI:
             language               = _stt.get("language", "ko"),
             device                 = _stt.get("device", "cpu"),
             wake_word              = _stt.get("wake_word", "자비스야"),
+            wake_source            = _stt.get("wake_source", "server"),
             porcupine_access_key   = _stt.get("porcupine_access_key", ""),
             porcupine_model_path   = _stt.get("porcupine_model_path", ""),
             porcupine_params_path  = _stt.get("porcupine_params_path", ""),
