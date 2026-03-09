@@ -43,11 +43,7 @@ iot-repo-1/
 │   └── settings.yaml       # 전체 설정 (서버/STT/TTS/LLM/디바이스/DB)
 ├── scripts/
 │   ├── init_db.sql         # MySQL 스키마 생성
-│   ├── download_models.sh  # 모델 파일 다운로드
-│   ├── ssl_generate_cert.sh # HTTPS용 자체 서명 인증서
-│   └── run_nginx.sh        # nginx 역방향 프록시 실행
-├── nginx/
-│   └── nginx.conf          # HTTPS 역방향 프록시 설정
+│   └── download_models.sh  # 모델 파일 다운로드
 ├── models/                 # 대용량 모델 (Git 미포함, MODELS.md 참조)
 ├── tests/                  # 테스트
 ├── docs/                   # 개발 문서
@@ -180,8 +176,6 @@ DISABLE_STT=1 DISABLE_TTS=1 ./run_server.sh
 |-----|--------|
 | `http://localhost:8000/` | 메인 페이지 |
 | `http://localhost:8000/dashboard` | 대시보드 (홈맵 + 센서 + 로그) |
-
-**원격 접속 시 브라우저 마이크 사용**: HTTPS가 필요합니다. nginx 역방향 프록시 설정은 [docs/NGINX_HTTPS_SETUP.md](docs/NGINX_HTTPS_SETUP.md) 참조.
 
 ### 대시보드 기능
 

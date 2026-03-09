@@ -1,14 +1,6 @@
 """
 frame_analyzer.py — InsightFace 얼굴인식 + YOLOv8 객체 감지 통합 분석기
-v1.2 | Voice IoT Controller
-
-v1.2 변경:
-  - bbox 표시 통합: InsightFace 얼굴 bbox 1개만 표시 (YOLO person bbox 제거)
-    → 얼굴 미검출 시에만 YOLO person bbox fallback 표시
-  - 라벨 형식 간소화: "FACE:stephen 69%" → "stephen 69%", "FACE:UNKNOWN" → "UNKNOWN"
-
-v1.1 변경:
-  - set_face_auth() 외부 임베딩 참조, _match_face() 통합
+v1.0 | Voice IoT Controller
 
 판정 우선순위:
   1. 등록 얼굴 매칭  → known     (조용히 로그)
@@ -55,17 +47,6 @@ class FrameAnalyzer:
         self._yolo       = None   # Ultralytics YOLO
         self._known_db: list[dict] = []   # [{name, embedding}, ...]
         self._loaded     = False
-        self._external_face_auth = None   # v1.1: 외부 FaceAuthenticator 참조
-
-    def set_face_auth(self, face_auth):
-        """SmartGate FaceAuthenticator 인스턴스 주입 (main.py에서 호출)
-        → 자체 얼굴 DB 대신 face_auth의 임베딩을 직접 사용
-        → encodings.pkl 포맷 충돌 완전 해소
-        """
-        self._external_face_auth = face_auth
-        logger.info(f"[FrameAnalyzer] 외부 FaceAuth 연동 | "
-                    f"사용자: {list(dict.fromkeys(face_auth.known_names))} | "
-                    f"{len(face_auth.known_embeddings)}장")
 
     # ── 초기화 ──────────────────────────────
     async def load(self):
@@ -108,42 +89,15 @@ class FrameAnalyzer:
 
     # ── 얼굴 DB 관리 ─────────────────────────
     def _load_face_db(self):
-        """등록 얼굴 인코딩 로드 (캐시 우선, face_auth.py 포맷 호환)"""
+        """등록 얼굴 인코딩 로드 (캐시 우선)"""
         if ENCODINGS_CACHE.exists():
             try:
                 with open(ENCODINGS_CACHE, "rb") as f:
-                    raw = pickle.load(f)
-
-                # ── 포맷 감지 & 변환 ──
-                # face_auth.py 포맷: {"embeddings": [...], "names": [...]}
-                # frame_analyzer 포맷: [{"name": str, "embedding": np.array}, ...]
-                if isinstance(raw, dict) and "embeddings" in raw:
-                    embeddings = raw.get("embeddings", raw.get("encodings", []))
-                    names = raw.get("names", [])
-                    # 사용자별 평균 임베딩으로 변환
-                    user_embs: dict[str, list] = {}
-                    for emb, name in zip(embeddings, names):
-                        user_embs.setdefault(name, []).append(emb)
-                    self._known_db = []
-                    for name, emb_list in user_embs.items():
-                        mean_emb = np.mean(emb_list, axis=0)
-                        mean_emb = mean_emb / np.linalg.norm(mean_emb)
-                        self._known_db.append({"name": name, "embedding": mean_emb})
-                    unique = [e["name"] for e in self._known_db]
-                    logger.info(
-                        f"[FrameAnalyzer] 얼굴 DB 캐시 로드 (face_auth 포맷 변환): "
-                        f"{unique} | 총 {len(embeddings)}장"
-                    )
-                elif isinstance(raw, list):
-                    # 기존 frame_analyzer 포맷 그대로
-                    self._known_db = raw
-                    logger.info(f"[FrameAnalyzer] 얼굴 DB 캐시 로드: {len(self._known_db)}명")
-                else:
-                    logger.warning("[FrameAnalyzer] 캐시 포맷 인식 불가, 재생성")
-                    self._build_face_db()
+                    self._known_db = pickle.load(f)
+                logger.info(f"[FrameAnalyzer] 얼굴 DB 캐시 로드: {len(self._known_db)}명")
                 return
-            except Exception as e:
-                logger.warning(f"[FrameAnalyzer] 캐시 로드 실패, 재생성: {e}")
+            except Exception:
+                logger.warning("[FrameAnalyzer] 캐시 로드 실패, 재생성")
 
         self._build_face_db()
 
@@ -200,23 +154,8 @@ class FrameAnalyzer:
     def _match_face(self, embedding: np.ndarray) -> tuple[str, float]:
         """
         등록 얼굴 DB와 cosine similarity 비교
-        v1.1: 외부 face_auth가 주입되면 해당 임베딩을 우선 사용
         Returns: (name or 'unknown', confidence 0~1)
         """
-        # ── 외부 face_auth 임베딩 우선 사용 ──
-        if self._external_face_auth is not None:
-            fa = self._external_face_auth
-            if fa.known_embeddings:
-                known_mat = np.array(fa.known_embeddings)  # (N, 512)
-                sims = np.dot(known_mat, embedding)
-                best_idx = int(np.argmax(sims))
-                best_sim = float(sims[best_idx])
-                if best_sim >= fa.tolerance:
-                    confidence = best_sim  # 0~1 범위 코사인 유사도
-                    return fa.known_names[best_idx], round(confidence, 3)
-                return "unknown", 0.0
-
-        # ── 자체 DB fallback ──
         if not self._known_db:
             return "unknown", 0.0
 
@@ -224,11 +163,13 @@ class FrameAnalyzer:
         best_score = -1.0
 
         for entry in self._known_db:
+            # cosine similarity (normed embedding이므로 내적 = cosine)
             score = float(np.dot(embedding, entry["embedding"]))
             if score > best_score:
                 best_score = score
                 best_name  = entry["name"]
 
+        # cosine → distance 변환 (0=동일, 1=완전다름)
         distance = 1.0 - best_score
         if distance < FACE_THRESHOLD:
             confidence = 1.0 - (distance / FACE_THRESHOLD)
@@ -291,12 +232,11 @@ class FrameAnalyzer:
         """
         t0 = time.perf_counter()
 
-        # JPEG 디코딩 + 좌우 반전 (camera_stream._decode_frame과 동일)
+        # JPEG 디코딩
         arr   = np.frombuffer(jpeg_bytes, dtype=np.uint8)
         frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if frame is None:
             return self._verdict("clear")
-        frame = cv2.flip(frame, 1)  # v1.2: 좌우 반전 (ESP-CAM 미러링 보정)
 
         bbox_list = []
 
@@ -320,7 +260,12 @@ class FrameAnalyzer:
         px, py, pw, ph = (primary_person["x"], primary_person["y"],
                           primary_person["w"], primary_person["h"])
 
-        # non-person 객체(택배 등)만 bbox에 추가
+        # bbox_list: primary person 1개 + non-person 객체(택배 등)만 추가
+        # 나머지 작은 person 박스는 제외
+        bbox_list.append({
+            "x": px, "y": py, "w": pw, "h": ph,
+            "label": f"person* {primary_person['confidence']:.0%}",
+        })
         for d in detections:
             if d["label"] != PERSON_CLASS:
                 bbox_list.append({
@@ -334,7 +279,6 @@ class FrameAnalyzer:
         matched_name = None
         best_conf    = 0.0
         face_unknown = False
-        face_detected = False    # v1.2: 얼굴 bbox 표시 여부 추적
 
         if self._face_app is not None:
             # 크롭 영역 (여백 10% 추가, 프레임 경계 클리핑)
@@ -359,23 +303,15 @@ class FrameAnalyzer:
                 bbox_list.append({
                     "x": fx1, "y": fy1,
                     "w": fx2 - fx1, "h": fy2 - fy1,
-                    "label": f"{name} {conf:.0%}" if name != "unknown"
-                             else "UNKNOWN",
+                    "label": f"FACE:{name} {conf:.0%}" if name != "unknown"
+                             else "FACE:UNKNOWN",
                 })
-                face_detected = True
 
                 if name != "unknown" and conf > best_conf:
                     best_conf    = conf
                     matched_name = name
                 elif name == "unknown":
                     face_unknown = True
-
-        # v1.2: 얼굴 미검출 시에만 YOLO person bbox를 fallback으로 표시
-        if not face_detected:
-            bbox_list.append({
-                "x": px, "y": py, "w": pw, "h": ph,
-                "label": f"person {primary_person['confidence']:.0%}",
-            })
 
         elapsed = time.perf_counter() - t0
         logger.debug(f"[FrameAnalyzer] 분석 {elapsed*1000:.0f}ms | "

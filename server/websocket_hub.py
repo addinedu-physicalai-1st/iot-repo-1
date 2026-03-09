@@ -194,10 +194,7 @@ class WebSocketHub:
             return
 
         msg_type = data.get("type", "unknown")
-        if msg_type != "audio_chunk":
-            logger.info(f"[WS] ← {client_id}: type={msg_type}")
-            if msg_type == "voice_text":
-                logger.info(f"[WS] 음성 텍스트: '{data.get('text', '')}'")
+        logger.info(f"[WS] ← {client_id}: type={msg_type}")
 
         # on_message 콜백 호출
         if self._on_message:

@@ -11,10 +11,10 @@
 #define CONFIG_H
 
 // ── Wi-Fi ────────────────────────────────────
-#define WIFI_SSID      "addinedu_201class_2-2.4G"
-#define WIFI_PASSWORD  "201class2!"
+#define WIFI_SSID      "your_wifi_ssid"
+#define WIFI_PASSWORD  "your_wifi_password"
 
 // ── 서버 IP (Python 서버) ────────────────────
-#define SERVER_IP      "192.168.0.189"
+#define SERVER_IP      "192.168.x.x"
 
 #endif // CONFIG_H

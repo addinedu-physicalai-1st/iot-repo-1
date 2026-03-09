@@ -6,15 +6,12 @@
 #   ./run_server.sh                              # 전체 기능 실행
 #   DISABLE_STT=1 DISABLE_TTS=1 ./run_server.sh  # STT/TTS 없이 실행
 #   DISABLE_DB=1 ./run_server.sh                 # MySQL 로깅 없이 실행
-#   DISABLE_SMARTGATE=1 ./run_server.sh          # SmartGate 2FA 없이 실행
 #
 # 환경 변수:
 #   .env 파일에서 민감정보 자동 로드 (cp .env_example .env)
-#   DISABLE_STT=1       : STT/웨이크워드 비활성화
-#   DISABLE_TTS=1       : TTS 비활성화
-#   DISABLE_DB=1        : MySQL 이벤트 로깅 비활성화
-#   DISABLE_CAM=1       : ESP32-CAM 카메라 비활성화
-#   DISABLE_SMARTGATE=1 : SmartGate 2FA 비활성화
+#   DISABLE_STT=1  : STT/웨이크워드 비활성화
+#   DISABLE_TTS=1  : TTS 비활성화
+#   DISABLE_DB=1   : MySQL 이벤트 로깅 비활성화
 #
 # 포트:
 #   8000 : FastAPI (HTTP + WebSocket)
@@ -28,20 +25,9 @@ cd "$(dirname "$0")"
 
 # 기존 프로세스 정리 (포트 충돌 방지)
 echo "기존 프로세스 정리 중..."
-./scripts/run_nginx.sh stop 2>/dev/null || true
 kill $(lsof -t -i:9000) 2>/dev/null || true
 kill $(lsof -t -i:8000) 2>/dev/null || true
 sleep 1
-
-# nginx 종료 트랩 (스크립트 종료 시 자동 실행)
-NGINX_STARTED=0
-cleanup_nginx() {
-  if [ "$NGINX_STARTED" = "1" ]; then
-    echo "nginx 종료 중..."
-    ./scripts/run_nginx.sh stop 2>/dev/null || true
-  fi
-}
-trap cleanup_nginx EXIT
 
 # 가상환경 자동 활성화 (.venv 존재 시)
 if [ -d ".venv" ] && [ -f ".venv/bin/activate" ]; then
@@ -90,51 +76,8 @@ if [ -z "$DISABLE_DB" ]; then
     fi
 fi
 
-# SmartGate 상태 표시
-if [ -n "$DISABLE_SMARTGATE" ]; then
-    echo "SmartGate 2FA: 비활성화 (DISABLE_SMARTGATE=1)"
-else
-    echo "SmartGate 2FA: 활성화"
-fi
-
 echo ""
 echo "서버 시작 중... (TCP:9000 / HTTP+WS:8000)"
+echo "  웹 대시보드: http://localhost:8000/dashboard"
 echo ""
-
-# uvicorn 백그라운드 실행
-uvicorn server.main:app --host 0.0.0.0 --port 8000 &
-UVICORN_PID=$!
-
-# 서버 준비 대기 (최대 30초)
-echo "서버 준비 대기 중..."
-for _ in $(seq 1 60); do
-  if curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/ 2>/dev/null | grep -q 200; then
-    echo "서버 준비 완료"
-    break
-  fi
-  sleep 0.5
-done
-
-# nginx (HTTPS) 자동 시작 (SSL 인증서 있으면)
-DASHBOARD_URL="http://localhost:8000/"
-if [ -f "nginx/ssl/iot.pem" ] && [ -f "nginx/ssl/iot-key.pem" ]; then
-  if ./scripts/run_nginx.sh; then
-    NGINX_STARTED=1
-    DASHBOARD_URL="https://localhost/"
-    echo "  웹 대시보드: $DASHBOARD_URL (HTTPS)"
-  else
-    echo "  웹 대시보드: http://localhost:8000/ (nginx 시작 실패)"
-  fi
-else
-  echo "  웹 대시보드: http://localhost:8000/"
-  echo "  (HTTPS: ./scripts/ssl_generate_cert.sh 후 재시작)"
-fi
-echo ""
-
-# 기본 브라우저에서 대시보드 자동 열기 (Linux)
-if command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "$DASHBOARD_URL" >/dev/null 2>&1
-fi
-
-# uvicorn 종료 대기
-wait $UVICORN_PID
+uvicorn server.main:app --host 0.0.0.0 --port 8000

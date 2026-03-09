@@ -187,7 +187,6 @@ class STTEngine:
         language:              str   = "ko",
         device:                str   = "cpu",
         wake_word:             str   = "자비스야",
-        wake_source:           str   = "server",  # "browser" | "server"
         porcupine_access_key:  str   = "",
         porcupine_model_path:  str   = "",
         porcupine_params_path: str   = "",
@@ -204,8 +203,7 @@ class STTEngine:
         self.language              = language
         self.device                = device
         self.wake_word             = wake_word
-        self.wake_source           = wake_source
-        self.porcupine_access_key   = porcupine_access_key
+        self.porcupine_access_key  = porcupine_access_key
         self.porcupine_model_path  = porcupine_model_path
         self.porcupine_params_path = porcupine_params_path
         self.mic_device            = mic_device
@@ -267,25 +265,19 @@ class STTEngine:
         self._loop    = asyncio.get_event_loop()
         self._running = True
 
-        if self.wake_source == "browser":
-            self._stream = None
-            logger.info(
-                f"[STT] 웨이크 소스=browser — 서버 마이크 비활성화, 브라우저 오디오 스트림 대기"
-            )
-        else:
-            self._stream = sd.RawInputStream(
-                samplerate=SAMPLE_RATE,
-                channels=CHANNELS,
-                dtype=DTYPE_INT16,
-                blocksize=PORCUPINE_FRAME_SIZE,
-                device=self.mic_device,
-                callback=self._audio_callback,
-            )
-            self._stream.start()
-            logger.info(
-                f"[STT] 마이크 스트림 시작 "
-                f"(SR={SAMPLE_RATE}Hz, frame={PORCUPINE_FRAME_SIZE}, device={self.mic_device})"
-            )
+        self._stream = sd.RawInputStream(
+            samplerate=SAMPLE_RATE,
+            channels=CHANNELS,
+            dtype=DTYPE_INT16,
+            blocksize=PORCUPINE_FRAME_SIZE,
+            device=self.mic_device,
+            callback=self._audio_callback,
+        )
+        self._stream.start()
+        logger.info(
+            f"[STT] 마이크 스트림 시작 "
+            f"(SR={SAMPLE_RATE}Hz, frame={PORCUPINE_FRAME_SIZE}, device={self.mic_device})"
+        )
         logger.info(
             f"[STT] 노이즈 억제: "
             f"{'활성 prop=' + str(self.noise_prop_decrease) if self._nr_available and self.noise_reduction else '비활성'}"
@@ -317,54 +309,6 @@ class STTEngine:
             self._d("DBG-STAT", self._stats.report(), level="info")
 
         logger.info("[STT] 엔진 종료")
-
-    async def set_mic_device(self, device_index: int) -> bool:
-        """
-        마이크 장치를 런타임에 교체
-        - 현재 스트림을 닫고 새 device_index로 재시작
-        - STT 엔진이 구동 중일 때만 동작 (start() 이후)
-        """
-        if not self._running:
-            self.mic_device = device_index
-            logger.info(f"[STT] 마이크 설정 변경 (미구동 중): device={device_index}")
-            return True
-
-        try:
-            # 기존 스트림 중단
-            if self._stream:
-                self._stream.stop()
-                self._stream.close()
-                self._stream = None
-
-            self.mic_device = device_index
-
-            # 새 장치로 스트림 재시작
-            self._stream = sd.RawInputStream(
-                samplerate=SAMPLE_RATE,
-                channels=CHANNELS,
-                dtype=DTYPE_INT16,
-                blocksize=PORCUPINE_FRAME_SIZE,
-                device=self.mic_device,
-                callback=self._audio_callback,
-            )
-            self._stream.start()
-            logger.info(f"[STT] 마이크 변경 완료: device={device_index}")
-            return True
-        except Exception as e:
-            logger.error(f"[STT] 마이크 변경 실패 device={device_index}: {e}")
-            return False
-
-    def feed_audio(self, chunk: bytes) -> None:
-        """
-        브라우저 오디오 청크 주입 (wake_source="browser" 모드)
-        WebSocket audio_chunk 수신 시 호출
-        """
-        if self.wake_source != "browser" or not self._running:
-            return
-        if self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                self._audio_queue.put(chunk), self._loop
-            )
 
     def activate(self):
         """버튼 모드: 외부 트리거 → 직접 LISTENING 전환"""
@@ -808,71 +752,19 @@ class STTEngine:
         if self._stats.success % 10 == 0:
             self._d("DBG-STAT", self._stats.report(), level="info")
 
-    async def transcribe_audio(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
-        """
-        오디오 → Whisper 전사 (브라우저 마이크 등 외부 입력용)
-        audio: float32 [-1,1] 또는 int16
-        sample_rate: 입력 샘플레이트 (16kHz가 아니면 리샘플링)
-        """
-        if audio is None or len(audio) == 0:
-            return ""
-        # Whisper 최소 길이 (0.5초 @ 16kHz) — reshape 오류 방지
-        min_samples = int(0.5 * SAMPLE_RATE)
-        if sample_rate != SAMPLE_RATE:
-            n_16k = int(len(audio) * SAMPLE_RATE / sample_rate)
-            if n_16k < min_samples:
-                return ""
-        elif len(audio) < min_samples:
-            return ""
-        if self._whisper is None:
-            await self._load_models()
-        if audio.dtype == np.int16:
-            audio = audio.astype(np.float32) / 32768.0
-        elif audio.dtype != np.float32:
-            audio = audio.astype(np.float32)
-        if sample_rate != SAMPLE_RATE:
-            n = int(len(audio) * SAMPLE_RATE / sample_rate)
-            audio = np.interp(
-                np.linspace(0, len(audio) - 1, n),
-                np.arange(len(audio)),
-                audio,
-            ).astype(np.float32)
-        loop = asyncio.get_event_loop()
-        raw_text, _, _ = await loop.run_in_executor(
-            None, lambda: self._run_whisper_with_debug(audio)
-        )
-        text, _ = self._clean_text_debug(raw_text)
-        return text.strip()
-
     def _run_whisper_with_debug(self, audio: np.ndarray) -> tuple[str, float, float]:
         """NR + Whisper 동기 실행. 반환: (raw_text, nr_ms, whisper_ms). OpenAI whisper 사용."""
-        min_len = int(0.5 * SAMPLE_RATE)  # 최소 0.5초부터 시도
-        pad_to = int(1.0 * SAMPLE_RATE)   # Whisper reshape 오류 방지: 1초 미만이면 제로패딩
-        if len(audio) < min_len:
-            return "", 0.0, 0.0
         audio_nr, nr_ms = self._apply_noise_reduction(audio)
-        if len(audio_nr) == 0:
-            return "", nr_ms, 0.0
-        # 짧은 오디오 패딩: Whisper reshape 오류 방지
-        if len(audio_nr) < pad_to:
-            pad = np.zeros(pad_to - len(audio_nr), dtype=np.float32)
-            audio_nr = np.concatenate([audio_nr, pad])
         # OpenAI whisper: float32, [-1, 1] 범위 기대
         if audio_nr.dtype != np.float32:
             audio_nr = audio_nr.astype(np.float32) / (np.iinfo(np.int16).max if audio_nr.dtype == np.int16 else 1.0)
 
         t0 = time.time()
-        try:
-            result = self._whisper.transcribe(
-                audio_nr,
-                language=self.language,
-                fp16=(self.device != "cpu"),
-            )
-        except (RuntimeError, ValueError) as e:
-            if "reshape" in str(e).lower() or "0 elements" in str(e):
-                logger.warning(f"[STT] Whisper reshape 오류 (짧은 오디오): {e}")
-                return "", nr_ms, 0.0
-            raise
+        result = self._whisper.transcribe(
+            audio_nr,
+            language=self.language,
+            fp16=(self.device != "cpu"),
+        )
         raw_text = (result.get("text") or "").strip()
         whisper_ms = (time.time() - t0) * 1000
         return raw_text, nr_ms, whisper_ms
@@ -956,15 +848,3 @@ class STTEngine:
             return "", "hallucination"
 
         return text, None
-
-    async def run_with_retry(self):
-        """start() 래퍼: 실패 시 재시도"""
-        retry_delay = 5
-        while True:
-            try:
-                await self.start()
-                break
-            except Exception as e:
-                logger.error(f"[STT] 시작 실패: {e} → {retry_delay}초 후 재시도")
-                await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, 60)

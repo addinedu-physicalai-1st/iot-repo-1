@@ -320,22 +320,6 @@ class TTSEngine:
 
         await loop.run_in_executor(None, _play)
 
-    # ── 재생 중지 (웨이크워드 감지 시 인터럽트) ────────────────────────
-
-    def stop(self) -> None:
-        """
-        현재 TTS 재생을 즉시 중지.
-        웨이크워드 '자비스야' 감지 시 호출됨.
-        """
-        if not self.is_speaking:
-            return
-        try:
-            import sounddevice as sd
-            sd.stop()
-            logger.info("[TTS] 재생 중지 (웨이크워드 감지)")
-        except Exception as e:
-            logger.warning(f"[TTS] 재생 중지 실패: {e}")
-
     # ── 상태 확인 ────────────────────────────────────────────────────
 
     async def is_available(self) -> bool:

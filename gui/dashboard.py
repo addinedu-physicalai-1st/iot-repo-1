@@ -852,12 +852,14 @@ class MainWindow(QMainWindow):
             self._log("명령 대기 시간 초과 → IDLE", "warn")
 
         elif t == "stt_result":
-            # STT 결과를 바로 표시하지 않음 — cmd_result에서 LLM 판단 후 표시
-            self.voice_text.setText("🔄 처리 중...")
+            text = data.get("text", "")
+            # STT 인식 결과 표시 (처리 중 상태)
+            self.voice_text.setText(f"🔄 {text}")
             self.voice_text.setStyleSheet(f"color:{C['cyan']}; font-size:13px; border:none; background:transparent;")
             self._set_voice_idle()
-            self._log("🎙️ STT 인식됨 (LLM 판단 대기)", "info")
-            self._last_stt_text = data.get("text", "")
+            self._log(f'🎙️ STT: "{text}"', "info")
+            # 3초 후 자동 클리어
+            QTimer.singleShot(3000, self._clear_voice_text)
 
         elif t == "cmd_result":
             status = data.get("status", "")
@@ -865,18 +867,6 @@ class MainWindow(QMainWindow):
             color  = C["green"] if status == "ok" else C["red"] if status == "fail" else C["text2"]
             self.voice_result.setText(f"{'✅' if status=='ok' else '❌' if status=='fail' else '❓'} {msg}")
             self.voice_result.setStyleSheet(f"color:{color}; font-size:12px; border:none; background:transparent;")
-            # voice command: LLM 성공 시 display_text, 실패/무관 시 original_text
-            display = data.get("display_text", "")
-            original = data.get("original_text", "")
-            if display:
-                self.voice_text.setText(display)
-                self.voice_text.setStyleSheet(f"color:{C['green']}; font-size:13px; border:none; background:transparent;")
-            elif original:
-                self.voice_text.setText(original)
-                self.voice_text.setStyleSheet(f"color:{C['text2']}; font-size:13px; border:none; background:transparent;")
-            elif getattr(self, "_last_stt_text", ""):
-                self.voice_text.setText(self._last_stt_text)
-                self.voice_text.setStyleSheet(f"color:{C['text2']}; font-size:13px; border:none; background:transparent;")
             # 결과 표시 후 4초 뒤 클리어
             QTimer.singleShot(4000, self._clear_voice_result)
 

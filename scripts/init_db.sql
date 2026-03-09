@@ -16,8 +16,8 @@ USE iot_smart_home;
 -- ────────────────────────────────────────────
 -- 사용자 생성 (이미 존재하면 스킵)
 -- ────────────────────────────────────────────
-CREATE USER IF NOT EXISTS 'iot_user'@'localhost' IDENTIFIED BY 'iot_password';
-GRANT ALL PRIVILEGES ON iot_smart_home.* TO 'iot_user'@'localhost';
+CREATE USER IF NOT EXISTS 'your_db_user'@'localhost' IDENTIFIED BY 'your_db_password';
+GRANT ALL PRIVILEGES ON iot_smart_home.* TO 'your_db_user'@'localhost';
 FLUSH PRIVILEGES;
 
 -- ────────────────────────────────────────────
