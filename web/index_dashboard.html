@@ -3822,6 +3822,7 @@ let dblogTotal = 0;
 
 function openDbLog() {
   document.getElementById('dblogOverlay').classList.add('show');
+  document.body.style.overflow = 'hidden';
   loadDbStats();
   loadDbCategories();
   searchDbLogs();
@@ -3829,6 +3830,7 @@ function openDbLog() {
 
 function closeDbLog() {
   document.getElementById('dblogOverlay').classList.remove('show');
+  document.body.style.overflow = '';
 }
 
 // ESC 키로 닫기
