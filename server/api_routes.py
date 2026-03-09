@@ -17,12 +17,14 @@ FastAPI REST 엔드포인트 + WebSocket 라우터
 
 from __future__ import annotations
 
+import base64
 import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Query, WebSocket, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+import numpy as np
+from fastapi import APIRouter, Query, Request, WebSocket, HTTPException
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from pydantic import BaseModel
 
 from protocol.schema import validate_command, ws_cmd_result
@@ -56,6 +58,17 @@ class VoiceRequest(BaseModel):
     text: str                         # STT 변환된 텍스트
 
 
+class MicDeviceRequest(BaseModel):
+    """POST /stt/mic-device 요청 바디"""
+    index: int
+
+
+class TranscribeAudioRequest(BaseModel):
+    """POST /stt/transcribe-audio 요청 바디 (브라우저 마이크용)"""
+    audio: str          # base64 인코딩된 PCM int16 (mono)
+    sample_rate: int = 16000
+
+
 class CommandResponse(BaseModel):
     """공통 응답"""
     status: str                       # ok / fail / unknown
@@ -66,39 +79,34 @@ class CommandResponse(BaseModel):
 # 라우터 팩토리
 # ─────────────────────────────────────────────
 
-def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRouter:
+def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_manager=None) -> APIRouter:
     """
     APIRouter 생성 및 엔드포인트 등록
 
     Parameters
     ----------
-    tcp_server      : TCPServer 인스턴스
-    ws_hub          : WebSocketHub 인스턴스
-    command_router  : CommandRouter 인스턴스
-    db_logger       : DBLogger 인스턴스 (선택)
+    tcp_server          : TCPServer 인스턴스
+    ws_hub              : WebSocketHub 인스턴스
+    command_router      : CommandRouter 인스턴스
+    db_logger           : DBLogger 인스턴스 (선택)
+    smartgate_manager   : SmartGateManager 인스턴스 (선택, v1.5)
     """
     router = APIRouter()
+
+    # ── GET /favicon.ico ─────────────────────────────────────────────
+    @router.get("/favicon.ico")
+    async def favicon():
+        """favicon 없음 — 404 방지"""
+        return Response(status_code=204)
 
     # ── GET / ───────────────────────────────────────────────────────
     @router.get("/", response_class=HTMLResponse)
     async def serve_index():
-        """첫 페이지: iot/index_main.html 서빙"""
-        index_path = WEB_DIR / "index_main.html"
-        if not index_path.exists():
-            return HTMLResponse(
-                content="<h2>첫 페이지 준비 중입니다. (iot/index_main.html 없음)</h2>",
-                status_code=200,
-            )
-        return FileResponse(str(index_path))
-
-    # ── GET /dashboard ──────────────────────────────────────────────
-    @router.get("/dashboard", response_class=HTMLResponse)
-    async def serve_dashboard():
-        """두 번째 페이지: web/index.html 서빙"""
+        """첫 페이지: web/index_dashboard.html 서빙"""
         index_path = WEB_DIR / "index_dashboard.html"
         if not index_path.exists():
             return HTMLResponse(
-                content="<h2>대시보드 준비 중입니다. (web/index.html 없음)</h2>",
+                content="<h2>대시보드 준비 중입니다. (web/index_dashboard.html 없음)</h2>",
                 status_code=200,
             )
         return FileResponse(str(index_path))
@@ -186,13 +194,11 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRout
           버튼 클릭 → 즉시 LISTENING
           "헤이 IoT" 발화 → 자동 LISTENING
         """
-        import sys
-        stt = None
-        for mod in sys.modules.values():
-            app = getattr(mod, 'app', None)
-            if app and hasattr(getattr(app, 'state', None), 'stt_engine'):
-                stt = app.state.stt_engine
-                break
+        try:
+            from server.main import app
+            stt = getattr(app.state, 'stt_engine', None)
+        except Exception:
+            stt = None
 
         if stt is None:
             return CommandResponse(
@@ -212,13 +218,108 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRout
         return CommandResponse(status="ok", msg="STT LISTENING 활성화")
 
     def _get_stt_state():
-        import sys
-        for mod in sys.modules.values():
-            app = getattr(mod, 'app', None)
-            if app and hasattr(getattr(app, 'state', None), 'stt_engine'):
-                stt = app.state.stt_engine
-                return getattr(stt, 'state', 'N/A') if stt else 'DISABLED'
-        return 'N/A'
+        try:
+            from server.main import app
+            stt = getattr(app.state, 'stt_engine', None)
+            return getattr(stt, 'state', 'N/A') if stt else 'DISABLED'
+        except Exception:
+            return 'N/A'
+
+    def _get_stt_engine():
+        try:
+            from server.main import app
+            return getattr(app.state, 'stt_engine', None)
+        except Exception:
+            return None
+
+    # ── GET /stt/devices ─────────────────────────────────────────
+    @router.get("/stt/devices")
+    async def stt_devices(request: Request):
+        """서버에서 인식 가능한 마이크(입력 장치) 목록 반환"""
+        import sounddevice as sd
+
+        # 마이크 목록 조회 (STT 엔진과 무관하게 항상 시도)
+        try:
+            devices = sd.query_devices()
+        except Exception as e:
+            return {"devices": [], "current": None, "error": f"sounddevice: {e}"}
+
+        def _val(d, key, default=0):
+            try:
+                return d.get(key, default) if hasattr(d, "get") else getattr(d, key, default)
+            except Exception:
+                return default
+
+        mic_list = []
+        for i, d in enumerate(devices):
+            max_in = _val(d, "max_input_channels", 0)
+            if max_in <= 0:
+                continue
+            name = _val(d, "name", f"Device {i}")
+            sr = _val(d, "default_samplerate", 0)
+            mic_list.append({"index": i, "name": str(name), "channels": int(max_in), "sample_rate": int(sr)})
+
+        # 현재 STT 마이크 인덱스 (실패해도 devices는 반환)
+        current_idx = None
+        try:
+            stt = getattr(request.app.state, "stt_engine", None)
+            if stt is not None:
+                current_idx = getattr(stt, "mic_device", None)
+        except Exception:
+            pass
+
+        return {"devices": mic_list, "current": current_idx}
+
+    # ── POST /stt/mic-device ──────────────────────────────────────
+    # @router.post("/stt/mic-device", response_model=CommandResponse)
+    # async def stt_set_mic_device(req: MicDeviceRequest):
+    #     """마이크 장치 변경 (런타임 교체)"""
+    #     stt = _get_stt_engine()
+    #     if stt is None:
+    #         return CommandResponse(status="warn", msg="STTEngine 비활성화 상태 (DISABLE_STT=1)")
+
+    #     ok = await stt.set_mic_device(req.index)
+    #     if ok:
+    #         logger.info(f"[API] 마이크 변경 완료: device={req.index}")
+    #         return CommandResponse(status="ok", msg=f"마이크 변경 완료: device={req.index}")
+    #     else:
+    #         return CommandResponse(status="fail", msg=f"마이크 변경 실패: device={req.index}")
+
+    @router.post("/stt/mic-device", response_model=CommandResponse)
+    async def stt_set_mic_device(request: Request, req: MicDeviceRequest):
+        """마이크 장치 변경 (런타임 교체)"""
+        stt = getattr(request.app.state, "stt_engine", None)
+        if stt is None:
+            return CommandResponse(status="warn", msg="STTEngine 비활성화 상태 (DISABLE_STT=1)")
+
+        ok = await stt.set_mic_device(req.index)
+        if ok:
+            # 아직 STT가 안 돌아가고 있다면 여기서 시작
+            if not getattr(stt, "_running", False):
+                import asyncio
+                asyncio.create_task(stt.run_with_retry())
+            logger.info(f"[API] 마이크 변경 완료: device={req.index}")
+            return CommandResponse(status="ok", msg=f"마이크 변경 완료: device={req.index}")
+        else:
+            return CommandResponse(status="fail", msg=f"마이크 변경 실패: device={req.index}")
+
+    # ── POST /stt/transcribe-audio (브라우저 마이크 → Whisper) ─────
+    @router.post("/stt/transcribe-audio")
+    async def stt_transcribe_audio(request: Request, req: TranscribeAudioRequest):
+        """브라우저에서 캡처한 오디오 → Whisper 전사 (원격/모바일 접속 시)"""
+        stt = getattr(request.app.state, "stt_engine", None)
+        if stt is None:
+            return {"text": "", "status": "warn", "msg": "STTEngine 비활성화 (DISABLE_STT=1)"}
+        try:
+            raw = base64.b64decode(req.audio)
+            if len(raw) < 1600:  # 0.05초 미만 (16kHz 기준)
+                raise ValueError("오디오가 너무 짧습니다 (최소 0.5초 필요)")
+            audio = np.frombuffer(raw, dtype=np.int16)
+            text = await stt.transcribe_audio(audio, sample_rate=req.sample_rate)
+            return {"text": text, "status": "ok"}
+        except Exception as e:
+            logger.warning(f"[API] transcribe-audio 오류: {e}")
+            return {"text": "", "status": "fail", "msg": str(e)}
 
     # ── SR-3.2: 이벤트 로그 검색/조회 API ─────────────────────────
 
@@ -357,5 +458,149 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None) -> APIRout
             item["media"] = media
 
         return item
+
+    # ── v1.5: SmartGate 엔드포인트 ──────────────────────────────────
+
+    @router.get("/smartgate/status")
+    async def smartgate_status():
+        """SmartGate 2FA 현재 상태 조회"""
+        if smartgate_manager is None:
+            return {"enabled": False, "msg": "SmartGate 비활성화 (DISABLE_SMARTGATE=1 또는 미초기화)"}
+        return smartgate_manager.status
+
+    @router.post("/smartgate/reload-faces", response_model=CommandResponse)
+    async def smartgate_reload_faces():
+        """등록 얼굴 DB 재임베딩 트리거"""
+        if smartgate_manager is None:
+            return CommandResponse(status="warn", msg="SmartGate 비활성화 상태")
+        try:
+            smartgate_manager.face_auth.reload_faces()
+            return CommandResponse(status="ok", msg="얼굴 DB 재임베딩 완료")
+        except Exception as e:
+            logger.error(f"[SmartGate] reload-faces 오류: {e}")
+            return CommandResponse(status="fail", msg=str(e))
+
+    @router.post("/smartgate/arm")
+    async def smartgate_arm():
+        """SmartGate 인증 시작 (IDLE → ARMED)"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+        return await smartgate_manager.arm()
+
+    @router.post("/smartgate/disarm")
+    async def smartgate_disarm():
+        """SmartGate 인증 취소 (ARMED → IDLE)"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+        return await smartgate_manager.disarm()
+
+    # ── v1.9: 얼굴 등록 엔드포인트 ──────────────────────────────────
+
+    @router.post("/smartgate/register-face")
+    async def smartgate_register_face(request: Request):
+        """현재 카메라 프레임에서 얼굴을 캡처하여 face_db에 저장"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+
+        try:
+            body = await request.json()
+        except Exception:
+            return {"status": "fail", "msg": "invalid JSON"}
+
+        name = (body.get("name") or "").strip().lower()
+        if not name:
+            return {"status": "fail", "msg": "사용자 이름을 입력하세요"}
+
+        import re
+        if not re.match(r'^[\w가-힣]+$', name):
+            return {"status": "fail", "msg": "이름은 영문/한글/숫자만 가능합니다"}
+
+        try:
+            from server.camera_stream import get_latest_jpeg
+            jpeg_bytes = get_latest_jpeg()
+        except ImportError:
+            return {"status": "fail", "msg": "camera_stream 모듈 없음"}
+
+        if jpeg_bytes is None:
+            return {"status": "fail", "msg": "카메라 프레임 없음 — 스트림이 활성 상태인지 확인하세요"}
+
+        import numpy as np
+        arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return {"status": "fail", "msg": "프레임 디코드 실패"}
+
+        faces = smartgate_manager.face_auth._app.get(frame)
+        if len(faces) == 0:
+            return {"status": "fail", "msg": "얼굴이 감지되지 않았습니다. 카메라를 바라보고 다시 시도하세요"}
+        if len(faces) > 1:
+            return {"status": "fail", "msg": f"얼굴이 {len(faces)}개 감지됨 — 1명만 촬영하세요"}
+
+        face_db_dir = Path(smartgate_manager.face_auth.face_db_dir)
+        user_dir = face_db_dir / "known" / name
+        user_dir.mkdir(parents=True, exist_ok=True)
+
+        existing = list(user_dir.glob("*.jpg")) + list(user_dir.glob("*.png"))
+        next_idx = len(existing) + 1
+        save_path = user_dir / f"{next_idx:03d}.jpg"
+
+        cv2.imwrite(str(save_path), frame)
+        logger.info(f"[SmartGate] 📸 얼굴 등록: {name} → {save_path} (총 {next_idx}장)")
+
+        cache_path = face_db_dir / "encodings.pkl"
+        if cache_path.exists():
+            cache_path.unlink()
+            logger.info("[SmartGate] encodings.pkl 초기화 → 다음 reload 시 재임베딩")
+
+        return {
+            "status": "ok",
+            "msg": f"✅ {name} 얼굴 등록 완료 ({next_idx}장)",
+            "name": name,
+            "count": next_idx,
+            "path": str(save_path),
+        }
+
+    @router.get("/smartgate/registered-faces")
+    async def smartgate_registered_faces():
+        """등록된 얼굴 사용자 목록 + 이미지 수 조회"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+
+        face_db_dir = Path(smartgate_manager.face_auth.face_db_dir)
+        known_dir = face_db_dir / "known"
+
+        if not known_dir.exists():
+            return {"users": [], "total": 0}
+
+        users = []
+        for user_dir in sorted(known_dir.iterdir()):
+            if user_dir.is_dir():
+                imgs = list(user_dir.glob("*.jpg")) + list(user_dir.glob("*.png"))
+                users.append({"name": user_dir.name, "count": len(imgs)})
+
+        return {"users": users, "total": len(users)}
+
+    @router.delete("/smartgate/registered-faces/{name}")
+    async def smartgate_delete_face(name: str):
+        """특정 사용자의 등록 얼굴 전체 삭제"""
+        if smartgate_manager is None:
+            return {"status": "fail", "msg": "SmartGate 비활성화 상태"}
+
+        import shutil
+        face_db_dir = Path(smartgate_manager.face_auth.face_db_dir)
+        user_dir = face_db_dir / "known" / name
+
+        if not user_dir.exists():
+            return {"status": "fail", "msg": f"'{name}' 사용자 없음"}
+
+        count = len(list(user_dir.glob("*.jpg")) + list(user_dir.glob("*.png")))
+        shutil.rmtree(str(user_dir))
+        logger.info(f"[SmartGate] 🗑️ 얼굴 삭제: {name} ({count}장)")
+
+        cache_path = face_db_dir / "encodings.pkl"
+        if cache_path.exists():
+            cache_path.unlink()
+
+        return {"status": "ok", "msg": f"'{name}' 삭제 완료 ({count}장)", "name": name}
 
     return router

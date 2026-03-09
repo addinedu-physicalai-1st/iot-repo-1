@@ -135,14 +135,8 @@ class UnifiedStateManager:
 
         if device_id in ("esp32_home", "esp32_home1"):
             # esp32_home1: 침실 서보(GPIO2), 욕실 7seg/DHT11
-            # LED 핀은 없으나, 하위 호환을 위해 ALL_ROOMS 기반 초기화 유지
-            for room in ALL_ROOMS:
-                led_key = f"led_{ROOM_LED_PIN[room]}"
-                state[led_key] = existing.get(led_key, 0)
-                servo_pin = ROOM_SERVO_PIN.get(room)
-                if servo_pin is not None:
-                    servo_key = f"servo_{servo_pin}"
-                    state[servo_key] = existing.get(servo_key, 0)
+            # LED 핀 없음 — 초기화하지 않아야 esp32_home2 LED 상태를 덮어쓰지 않음
+            state["servo_2"] = existing.get("servo_2", 0)  # 침실 커튼 서보 GPIO2
 
         elif device_id == "esp32_home2":
             # esp32_home2: LED 5개 + 서보 2개(차고GPIO15, 현관GPIO16)
@@ -197,9 +191,9 @@ class UnifiedStateManager:
             if s:
                 state[f"led_{pin}"] = 1 if s == "on" else 0
         elif cmd == "servo":
-            pin   = data.get("pin", 18)
+            pin   = data.get("pin")
             angle = data.get("angle")
-            if angle is not None:
+            if angle is not None and pin is not None:
                 state[f"servo_{pin}"] = angle
         self._updated_at[device_id] = time.time()
 
@@ -578,10 +572,10 @@ class TCPServer:
                     detail = f" state={state}"
             elif cmd == "servo":
                 angle = data.get("angle")
-                pin   = data.get("pin", 18)
-                if angle is not None:
+                pin   = data.get("pin")
+                if angle is not None and pin is not None:
                     client.state[f"servo_{pin}"] = angle
-                    detail = f" angle={angle}"
+                    detail = f" angle={angle} pin={pin}"
 
             # UnifiedStateManager 확정 반영
             self._unified_state_manager.update_ack(client.device_id, cmd, data)

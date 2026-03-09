@@ -1,7 +1,17 @@
 """
 server/main.py
 ==============
-Voice IoT Controller - 진입점 v0.8
+Voice IoT Controller - 진입점 v0.9
+
+v0.9 변경사항:
+  - SmartGate 2FA 서브패키지 통합 (server/smartgate/)
+  - SmartGateManager lifespan 등록 (startup / shutdown)
+  - camera_stream.set_smartgate_manager() 연동 → 프레임 공급
+  - DISABLE_SMARTGATE=1 환경 변수로 독립 비활성화
+  - 신규 엔드포인트 (api_routes.py):
+      GET  /smartgate/status         SmartGate 상태 조회
+      POST /smartgate/reload-faces   얼굴 DB 재임베딩
+  - _print_banner에 GATE 항목 추가
 
 v0.8 변경사항:
   - ESP32-CAM UDP 기반 현관 보안 카메라 시스템 통합
@@ -9,7 +19,8 @@ v0.8 변경사항:
   - frame_analyzer.py : InsightFace 얼굴인식 + YOLOv8 객체감지
   - face_db.py        : 등록 얼굴 DB REST API 라우터
   - 신규 엔드포인트:
-      GET  /camera/entrance/stream    MJPEG HTTP 스트림
+      GET  /camera/entrance/stream    MJPEG HTTP 스트림 (오버레이 포함)
+      GET  /camera/entrance/raw       MJPEG Raw (지연 최소, 재인코딩 없음)
       GET  /camera/entrance/snapshot  스냅샷 JPEG 1장
       GET  /face-db/list              등록 인물 목록
       POST /face-db/register          얼굴 등록 (multipart)
@@ -162,11 +173,12 @@ def create_app() -> FastAPI:
     cfg = load_settings()
 
     # ── 환경 변수 플래그 ─────────────────────────────────────────────
-    disable_stt = os.getenv("DISABLE_STT", "0") == "1"
-    disable_llm = os.getenv("DISABLE_LLM", "0") == "1"
-    disable_tts = os.getenv("DISABLE_TTS", "0") == "1"
-    disable_db  = os.getenv("DISABLE_DB",  "0") == "1"
-    disable_cam = os.getenv("DISABLE_CAM", "0") == "1"   # v0.8 신규
+    disable_stt      = os.getenv("DISABLE_STT",      "0") == "1"
+    disable_llm      = os.getenv("DISABLE_LLM",      "0") == "1"
+    disable_tts      = os.getenv("DISABLE_TTS",      "0") == "1"
+    disable_db       = os.getenv("DISABLE_DB",       "0") == "1"
+    disable_cam      = os.getenv("DISABLE_CAM",      "0") == "1"   # v0.8 신규
+    disable_smartgate= os.getenv("DISABLE_SMARTGATE","0") == "1"   # v0.9 신규
 
     # ════════════════════════════════════════════
     # 1. 핵심 인스턴스 생성
@@ -180,13 +192,17 @@ def create_app() -> FastAPI:
 
     # ── 브라우저 접속 시 현재 상태 즉시 전송 ────────────────────────
     async def _on_ws_connect(client_id: str, send_fn):
-        """새 브라우저 접속 → device_list + 각 device_update 즉시 전송"""
+        """새 브라우저 접속 → device_list + 각 device_update + stt config 전송"""
+        import json as _json
         from protocol.schema import ws_device_list, ws_device_update
         devices = tcp_server.get_device_list()
         await send_fn(ws_device_list(devices))
         for d in devices:
             await send_fn(ws_device_update(d["device_id"], d["state"]))
-        logger.info(f"[WS] 접속 {client_id} → device_list {len(devices)}개 + state 전송")
+        # 웨이크워드 소스: browser=브라우저 마이크만 | server=서버 마이크
+        wake_src = cfg.get("stt", {}).get("wake_source", "server")
+        await send_fn(_json.dumps({"type": "config", "stt_wake_source": wake_src}, ensure_ascii=False))
+        logger.info(f"[WS] 접속 {client_id} → device_list {len(devices)}개 + state + stt_wake_source={wake_src}")
 
     ws_hub._on_connect = _on_ws_connect
 
@@ -253,12 +269,13 @@ def create_app() -> FastAPI:
         _stt = cfg.get("stt", {})
         stt_engine = STTEngine(
             on_result              = _make_stt_callback(command_router, ws_hub, tts_engine, db_logger),
-            on_wake                = _make_wake_callback(ws_hub),
+            on_wake                = _make_wake_callback(ws_hub, tts_engine),
             on_timeout             = _make_timeout_callback(ws_hub),
             model_size             = _stt.get("model_size", "base"),
             language               = _stt.get("language", "ko"),
             device                 = _stt.get("device", "cpu"),
             wake_word              = _stt.get("wake_word", "자비스야"),
+            wake_source            = _stt.get("wake_source", "server"),
             porcupine_access_key   = _stt.get("porcupine_access_key", ""),
             porcupine_model_path   = _stt.get("porcupine_model_path", ""),
             porcupine_params_path  = _stt.get("porcupine_params_path", ""),
@@ -291,6 +308,32 @@ def create_app() -> FastAPI:
     else:
         logger.warning("카메라 비활성화 (DISABLE_CAM=1)")
 
+    # ── v0.9: SmartGate 2FA Manager ──────────────────────────────────
+    smartgate_manager = None
+    if not disable_smartgate:
+        try:
+            from server.smartgate import SmartGateManager
+            _sg_cfg = cfg.get("smartgate", {})
+            if _sg_cfg.get("enabled", True):
+                smartgate_manager = SmartGateManager(
+                    settings=cfg,
+                    tcp_server=tcp_server,
+                    ws_broadcast_fn=ws_hub.broadcast,
+                    tts_fn=tts_engine.speak if tts_engine else None,
+                    db_logger=db_logger,
+                )
+                logger.info("[SmartGate] SmartGateManager 생성 완료")
+            else:
+                logger.warning("[SmartGate] settings.yaml smartgate.enabled=false — 비활성화")
+        except ImportError as e:
+            logger.warning(f"[SmartGate] import 실패 (서브패키지 미설치): {e}")
+            disable_smartgate = True
+        except Exception as e:
+            logger.warning(f"[SmartGate] 초기화 실패: {e}")
+            disable_smartgate = True
+    else:
+        logger.warning("SmartGate 비활성화 (DISABLE_SMARTGATE=1)")
+
     # ════════════════════════════════════════════
     # 2. 상호 의존성 연결
     # ════════════════════════════════════════════
@@ -306,7 +349,8 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        _print_banner(cfg, stt_engine, llm_engine, tts_engine, db_logger, disable_cam)
+        _print_banner(cfg, stt_engine, llm_engine, tts_engine, db_logger,
+                      disable_cam, disable_smartgate, smartgate_manager)
 
         # TCP 서버 시작
         await tcp_server.start()
@@ -359,7 +403,8 @@ def create_app() -> FastAPI:
             # ESP-CAM 설정 (settings.yaml camera 블록 있으면 사용)
             _cam_cfg    = cfg.get("camera", {})
             _udp_port   = _cam_cfg.get("udp_port",   5005)
-            _multipart  = _cam_cfg.get("multipart",  False)
+            # 항상 멀티파트 모드 사용 (헤더+조각 조립)
+            _multipart  = _cam_cfg.get("multipart",  True)
             _analyze_n  = _cam_cfg.get("analyze_every", 10)
 
             cam_mod.UDP_PORT       = _udp_port
@@ -398,6 +443,36 @@ def create_app() -> FastAPI:
             )
             logger.info("[CAM] analysis_loop task 시작")
 
+        # ── v0.9: SmartGate 시작 ─────────────────────────────────────
+        if smartgate_manager is not None:
+            import server.camera_stream as _cam_ref
+            _cam_ref.set_smartgate_manager(smartgate_manager)
+            await smartgate_manager.start()
+            logger.info("[SmartGate] SmartGateManager 시작 완료")
+
+            # v1.1: frame_analyzer에 face_auth 주입 (얼굴 DB 통합)
+            # → encodings.pkl 포맷 충돌 해소, 인식 결과 일관성 보장
+            if frame_analyzer is not None:
+                frame_analyzer.set_face_auth(smartgate_manager.face_auth)
+                logger.info("[CAM] frame_analyzer ← SmartGate face_auth 연동 완료")
+
+        # ── v1.0: 보안모드 → camera_stream 연동 ──────────────────────
+        # command_router._current_pir_mode ("dnd_mode" 등)를 camera_stream에 전달
+        # → 방해 금지 모드 시 intruder 알람 억제
+        if not disable_cam:
+            import server.camera_stream as _cam_ref2
+
+            def _get_security_mode() -> str:
+                """현재 PIR 보안모드 반환 (camera_stream 콜백용)"""
+                pir = command_router._current_pir_mode
+                # "dnd_mode" → "dnd", "away_mode" → "away", None → "off"
+                if pir is None:
+                    return "off"
+                return pir.replace("_mode", "")
+
+            _cam_ref2.set_security_mode_fn(_get_security_mode)
+            logger.info("[CAM] 보안모드 콜백 연동 완료 (command_router → camera_stream)")
+
         logger.info("=" * 50)
         logger.info("서버 준비 완료 - 요청 대기 중")
         logger.info("=" * 50)
@@ -418,6 +493,11 @@ def create_app() -> FastAPI:
             stt_task.cancel()
         if poll_task:
             poll_task.cancel()
+
+        # v0.9: SmartGate 종료
+        if smartgate_manager is not None:
+            await smartgate_manager.stop()
+            logger.info("[SmartGate] SmartGateManager 종료 완료")
 
         # v0.8: 카메라 종료
         if not disable_cam and analysis_task:
@@ -458,6 +538,7 @@ def create_app() -> FastAPI:
         ws_hub=ws_hub,
         command_router=command_router,
         db_logger=db_logger,
+        smartgate_manager=smartgate_manager,   # v0.9 추가
     )
     app.include_router(api_router)
 
@@ -474,8 +555,14 @@ def create_app() -> FastAPI:
     @app.post("/pir-event")
     async def pir_event(request: Request):
         """
-        ESP32 PIR 이벤트 수신 (v0.7)
-        ESP32: POST /pir-event {"type":"pir_event","event":"guard_alert","detail":"...","context":"away"}
+        현관 PIR 이벤트 수신 — 환영 전용 (v1.1)
+
+        SmartGate 2FA 인증 성공 후 쿨다운(120초) 내 PIR 감지 시:
+          → 현관 조명 ON + TTS 환영 인사 트리거
+        쿨다운 외 또는 환영 완료 시:
+          → 단순 로그 기록 (보안 경고 없음)
+
+        ESP32: POST /pir-event {"type":"pir_event","event":"...","detail":"..."}
         """
         try:
             body = await request.json()
@@ -484,46 +571,28 @@ def create_app() -> FastAPI:
 
         event   = body.get("event", "")
         detail  = body.get("detail", "")
-        context = body.get("context", "unknown")
 
-        # 이벤트별 메시지 생성
-        msg_map = {
-            ("guard_alert",    "away"):  "🚨 외출 중 침입 감지!",
-            ("guard_alert",    "sleep"): "🚨 취침 중 거실 침입 감지!",
-            ("presence_alert", "home"):  "⚠️ 장시간 움직임 없음 — 괜찮으신가요?",
-        }
-        alert_msg = msg_map.get((event, context), f"PIR 이벤트: {event} ({context})")
+        # ── SmartGate 환영 트리거 (인증 후 PIR 감지 시) ──
+        if smartgate_manager is not None and smartgate_manager.welcome_pending:
+            welcomed = await smartgate_manager.trigger_welcome()
+            if welcomed:
+                logger.info("[PIR] SmartGate 환영 동작 트리거 완료")
+                return JSONResponse({
+                    "status": "ok",
+                    "msg": "🏠 환영 모드 — 조명 ON + TTS 인사",
+                    "welcome": True,
+                })
 
-        logger.warning(f"[PIR] {alert_msg} | detail={detail}")
+        # ── 환영 대기가 아닌 일반 PIR 감지 — 로그만 기록 ──
+        logger.info(f"[PIR] 현관 감지 | event={event} detail={detail}")
 
-        # DB 로그 (SR-3.1)
-        if db_logger and db_logger.enabled:
-            db_logger.log("security_alert", "main", alert_msg,
-                          device_id="http_client", level="WARN",
-                          detail={"event": event, "context": context, "detail": detail})
-
-        # WS 브로드캐스트 → 프론트엔드 알림
-        await ws_hub.broadcast(
-            f'{{"type":"pir_alert","msg":"{alert_msg}","event":"{event}","context":"{context}"}}'
-        )
-
-        # Telegram 알림 (telegram_bot 모듈 존재 시)
-        try:
-            from server.telegram_bot import send_alert
-            await send_alert(alert_msg)
-            logger.info("[PIR] Telegram 알림 전송 완료")
-        except ImportError:
-            logger.info("[PIR] telegram_bot 미설치 — Telegram 알림 스킵")
-        except Exception as e:
-            logger.warning(f"[PIR] Telegram 알림 실패: {e}")
-
-        return JSONResponse({"status": "ok", "msg": alert_msg})
+        return JSONResponse({"status": "ok", "msg": "현관 PIR 감지 (정상)"})
 
     # ── v0.8: 카메라 엔드포인트 ─────────────────────────────────────
     @app.get("/camera/entrance/stream")
     async def camera_entrance_stream():
         """
-        현관 ESP32-CAM MJPEG HTTP 스트림
+        현관 ESP32-CAM MJPEG HTTP 스트림 (오버레이 포함, 분석용)
         웹앱: <img src="/camera/entrance/stream">
         """
         if disable_cam:
@@ -545,6 +614,34 @@ def create_app() -> FastAPI:
                 "Cache-Control":    "no-cache, no-store, must-revalidate",
                 "Pragma":           "no-cache",
                 "X-Accel-Buffering":"no",   # nginx reverse proxy 버퍼링 비활성화
+            },
+        )
+
+    @app.get("/camera/entrance/raw")
+    async def camera_entrance_raw():
+        """
+        현관 ESP32-CAM Raw MJPEG 스트림 (지연 최소)
+        디코드/오버레이/재인코딩 없이 원본 JPEG 전송
+        """
+        if disable_cam:
+            return JSONResponse(
+                {"status": "error", "msg": "카메라 비활성화 (DISABLE_CAM=1)"},
+                status_code=503,
+            )
+        try:
+            from server.camera_stream import mjpeg_raw_generator
+        except ImportError:
+            return JSONResponse(
+                {"status": "error", "msg": "camera_stream 모듈 없음"},
+                status_code=503,
+            )
+        return StreamingResponse(
+            mjpeg_raw_generator(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control":    "no-cache, no-store, must-revalidate",
+                "Pragma":           "no-cache",
+                "X-Accel-Buffering":"no",
             },
         )
 
@@ -597,15 +694,16 @@ def create_app() -> FastAPI:
             return JSONResponse({"active": False, "reason": "모듈 없음"})
 
     # ── 인스턴스 바인딩 (디버그 / 테스트용) ──────────────────────────
-    app.state.tcp_server     = tcp_server
-    app.state.ws_hub         = ws_hub
-    app.state.command_router = command_router
-    app.state.llm_engine     = llm_engine
-    app.state.stt_engine     = stt_engine
-    app.state.tts_engine     = tts_engine
-    app.state.frame_analyzer = frame_analyzer   # v0.8 신규
-    app.state.db_logger      = db_logger
-    app.state.settings       = cfg
+    app.state.tcp_server       = tcp_server
+    app.state.ws_hub           = ws_hub
+    app.state.command_router   = command_router
+    app.state.llm_engine       = llm_engine
+    app.state.stt_engine       = stt_engine
+    app.state.tts_engine       = tts_engine
+    app.state.frame_analyzer   = frame_analyzer      # v0.8 신규
+    app.state.smartgate_manager= smartgate_manager   # v0.9 신규
+    app.state.db_logger        = db_logger
+    app.state.settings         = cfg
 
     return app
 
@@ -687,9 +785,12 @@ def _extract_tts_response(result) -> str | None:
         return None
 
 
-def _make_wake_callback(ws_hub: WebSocketHub):
-    """웨이크 워드 감지 콜백"""
+def _make_wake_callback(ws_hub: WebSocketHub, tts_engine: TTSEngine | None = None):
+    """웨이크 워드 감지 콜백 — TTS 재생 중이면 즉시 중지"""
     async def on_wake():
+        if tts_engine and tts_engine.is_speaking:
+            tts_engine.stop()
+            logger.info("[Pipeline] 웨이크 워드 감지 → TTS 재생 중지")
         logger.info("[Pipeline] 웨이크 워드 감지 → UI 알림")
         await ws_hub.broadcast(
             '{"type":"wake_detected","msg":"자비스야 감지됨 - 명령을 말씀하세요"}'
@@ -748,7 +849,9 @@ async def _start_stt(stt_engine: STTEngine):
 # 시작 배너
 # ─────────────────────────────────────────────
 
-def _print_banner(cfg: dict, stt_engine, llm_engine, tts_engine, db_logger=None, disable_cam: bool=False):
+def _print_banner(cfg: dict, stt_engine, llm_engine, tts_engine, db_logger=None,
+                  disable_cam: bool = False, disable_smartgate: bool = False,
+                  smartgate_manager=None):
     _stt = cfg.get("stt", {})
     _tts = cfg.get("tts", {})
     _db  = cfg.get("database", {})
@@ -777,6 +880,18 @@ def _print_banner(cfg: dict, stt_engine, llm_engine, tts_engine, db_logger=None,
         logger.info(f"  CAM  : ✅ ESP32-CAM UDP:{_udp_port} (InsightFace + YOLOv8)")
     else:
         logger.info(f"  CAM  : ⛔ 비활성화 (DISABLE_CAM=1)")
+    # v0.9 SmartGate 배너
+    if not disable_smartgate and smartgate_manager is not None:
+        _sg     = cfg.get("smartgate", {})
+        _gc     = _sg.get("gesture_auth", {})
+        _mode   = _gc.get("mode", "number")
+        _seq    = _gc.get("sequence", [])
+        _lv_cfg = _sg.get("liveness", {})
+        _profile= _lv_cfg.get("active_profile", "laptop")
+        logger.info(f"  GATE : ✅ SmartGate 2FA | {_mode} {_seq}")
+        logger.info(f"         Liveness profile: [{_profile}]")
+    else:
+        logger.info(f"  GATE : ⛔ SmartGate 비활성화")
     logger.info("=" * w)
 
 

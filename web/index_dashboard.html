@@ -106,6 +106,28 @@ header {
 }
 .ws-dot.connected { background:var(--green); box-shadow:0 0 6px var(--green); }
 
+/* ── 마이크 선택 ── */
+.mic-select-wrap {
+  display:flex; align-items:center; gap:6px;
+  font-family:var(--font-mono); font-size:0.7rem;
+  color:var(--text2);
+}
+.mic-select-wrap label { letter-spacing:0.08em; white-space:nowrap; }
+.mic-select-wrap select {
+  background:var(--bg2); color:var(--text);
+  border:1px solid var(--border); border-radius:6px;
+  padding:3px 6px; font-size:0.68rem; font-family:var(--font-mono);
+  cursor:pointer; max-width:200px;
+  outline:none;
+  transition:border-color 0.2s;
+}
+.mic-select-wrap select:hover  { border-color:var(--cyan); }
+.mic-select-wrap select:focus  { border-color:var(--cyan); box-shadow:0 0 0 2px rgba(0,200,255,0.15); }
+.mic-select-wrap .mic-status {
+  font-size:0.65rem; color:var(--text2); white-space:nowrap;
+}
+.mic-select-wrap .mic-status.ok   { color:var(--green); }
+.mic-select-wrap .mic-status.fail { color:var(--red); }
 /* ── 레이아웃 ── */
 .layout {
   position:relative; z-index:1;
@@ -165,6 +187,7 @@ header {
   box-shadow:0 0 20px rgba(0,200,255,0.15);
 }
 .mic-btn:hover { transform:scale(1.05); box-shadow:0 0 30px rgba(0,200,255,0.3); }
+.mic-btn { touch-action: manipulation; }
 .mic-btn.active {
   background:rgba(0,200,255,0.15);
   border-color:var(--cyan2);
@@ -181,16 +204,26 @@ header {
   font-size:0.65rem; letter-spacing:0.2em;
   color:var(--text2); text-transform:uppercase; margin-bottom:6px;
 }
-.voice-text {
-  font-size:1.4rem; font-weight:600; color:#fff;
-  min-height:34px; line-height:1.2;
+.voice-exchange { display:flex; flex-direction:column; gap:8px; }
+.voice-row {
+  display:flex; align-items:flex-start; gap:10px;
+  min-height:20px;
 }
-.voice-text.placeholder { color:var(--text2); font-weight:400; font-size:1rem; }
+.voice-row-label {
+  font-size:0.65rem; color:var(--text2);
+  letter-spacing:0.1em; min-width:48px; flex-shrink:0;
+}
+.voice-text {
+  font-size:1.2rem; font-weight:600; color:#fff;
+  min-height:24px; line-height:1.3; flex:1;
+}
+.voice-text.placeholder { color:var(--text2); font-weight:400; font-size:0.95rem; }
 
 .voice-result {
   font-family:var(--font-mono); font-size:0.72rem;
-  color:var(--cyan); margin-top:6px; min-height:18px;
+  color:var(--cyan); flex:1; min-height:18px;
 }
+.voice-result.empty { color:var(--text2); }
 
 /* 수동 입력 */
 .manual-input-wrap {
@@ -359,6 +392,149 @@ header {
   background:rgba(255,180,0,0.1);
   border-color:var(--yellow); color:var(--yellow);
 }
+
+/* ── SmartGate 오버레이 (v1.7) ── */
+.sg-overlay {
+
+  display:none;
+  position:absolute; top:0; left:0; right:0; bottom:0;
+  pointer-events:none; z-index:20;
+  transition:opacity 0.3s;
+}
+.sg-overlay.active { display:flex; flex-direction:column; }
+
+.sg-overlay-banner {
+  padding:8px 12px;
+  font-family:var(--font-mono); font-size:0.7rem;
+  font-weight:700; letter-spacing:0.1em;
+  color:#fff;
+}
+.sg-overlay-banner.liveness  { background:rgba(100,30,140,0.85); }
+.sg-overlay-banner.face-ok   { background:rgba(0,120,60,0.85); }
+.sg-overlay-banner.gesture-ok{ background:rgba(0,160,0,0.9); }
+.sg-overlay-banner.locked    { background:rgba(160,0,0,0.85); }
+
+.sg-overlay-msg {
+  padding:4px 12px;
+  font-family:var(--font-mono); font-size:0.65rem;
+  color:rgba(255,255,255,0.9);
+  background:rgba(0,0,0,0.5);
+}
+
+.sg-overlay-challenge {
+  position:absolute; bottom:32px; left:0; right:0;
+  text-align:center;
+  font-family:var(--font-main); font-size:1.1rem;
+  font-weight:700; color:#fff;
+  text-shadow:0 0 12px rgba(160,80,255,0.8);
+  animation:sg-pulse 1.5s ease-in-out infinite;
+}
+@keyframes sg-pulse {
+  0%,100%{opacity:1} 50%{opacity:0.6}
+}
+
+.sg-overlay-user {
+  position:absolute; bottom:8px; left:12px;
+  font-family:var(--font-mono); font-size:0.6rem;
+  color:rgba(100,200,255,0.8);
+}
+
+.sg-overlay-success {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  flex-direction:column;
+  background:rgba(0,160,0,0.3);
+}
+.sg-overlay-success .sg-success-icon { font-size:2.5rem; }
+.sg-overlay-success .sg-success-text {
+  font-size:1rem; font-weight:700; color:#fff;
+  margin-top:4px; letter-spacing:0.1em;
+}
+
+.sg-overlay-locked {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  flex-direction:column;
+  background:rgba(160,0,0,0.3);
+}
+.sg-overlay-locked .sg-lock-icon { font-size:2rem; }
+.sg-overlay-locked .sg-lock-text {
+  font-size:0.85rem; font-weight:700; color:rgba(255,100,100,0.9);
+  margin-top:4px;
+}
+/* ── SmartGate ARM 버튼 ── */
+.cam-btn-arm {
+  padding:4px 12px; border:1px solid #6c5ce7; border-radius:4px;
+  background:#6c5ce7; color:#fff; font-size:0.82rem; cursor:pointer;
+  transition: all 0.2s;
+}
+.cam-btn-arm:hover { background:#5a4bd1; }
+.cam-btn-arm.armed {
+  background:#e74c3c; border-color:#e74c3c; animation: sg-pulse 1.5s infinite;
+}
+@keyframes sg-pulse {
+  0%,100% { opacity:1; } 50% { opacity:0.7; }
+}
+/* ── SmartGate 얼굴 등록 ── */
+.cam-btn-register {
+  padding:4px 12px; border:1px solid #00b894; border-radius:4px;
+  background:#00b894; color:#fff; font-size:0.82rem; cursor:pointer;
+  transition: all 0.2s;
+}
+.cam-btn-register:hover { background:#00a381; }
+.sg-register-modal {
+  display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,0.6); z-index:9999;
+  align-items:center; justify-content:center;
+}
+.sg-register-modal.active { display:flex; }
+.sg-register-content {
+  background:#1a1d23; border:1px solid #333; border-radius:12px;
+  width:380px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.5);
+}
+.sg-register-header {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:14px 18px; border-bottom:1px solid #333;
+  font-size:0.95rem; font-weight:700; color:#e0e0e0;
+}
+.sg-register-close {
+  background:none; border:none; color:#888; font-size:1.1rem; cursor:pointer;
+}
+.sg-register-close:hover { color:#e74c3c; }
+.sg-register-body { padding:16px 18px; }
+.sg-register-input-row {
+  display:flex; align-items:center; gap:10px; margin-bottom:12px;
+}
+.sg-register-input-row label { color:#aaa; font-size:0.82rem; white-space:nowrap; }
+.sg-register-input-row input {
+  flex:1; padding:6px 10px; background:#12141a; border:1px solid #444;
+  border-radius:6px; color:#fff; font-size:0.85rem; outline:none;
+}
+.sg-register-input-row input:focus { border-color:#6c5ce7; }
+.sg-register-info {
+  color:#aaa; font-size:0.8rem; margin-bottom:10px; min-height:20px;
+}
+.sg-register-info.ok { color:#00b894; }
+.sg-register-info.fail { color:#e74c3c; }
+.sg-register-count { color:#6c5ce7; font-size:0.82rem; margin-bottom:10px; }
+.sg-register-actions { display:flex; gap:8px; margin-bottom:14px; }
+.sg-btn-capture {
+  flex:1; padding:8px; border:none; border-radius:6px;
+  background:#6c5ce7; color:#fff; font-size:0.85rem; cursor:pointer;
+}
+.sg-btn-capture:hover { background:#5a4bd1; }
+.sg-btn-reload {
+  padding:8px 14px; border:1px solid #555; border-radius:6px;
+  background:transparent; color:#ccc; font-size:0.85rem; cursor:pointer;
+}
+.sg-btn-reload:hover { background:#2a2d33; }
+.sg-register-list { border-top:1px solid #333; padding-top:10px; }
+.sg-user-row {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:6px 0; font-size:0.82rem; color:#ccc;
+}
+.sg-user-row .sg-user-del {
+  background:none; border:none; color:#e74c3c; cursor:pointer; font-size:0.8rem;
+}
+.sg-user-row .sg-user-del:hover { text-decoration:underline; }
 
 /* ── 우측 패널 ── */
 .side-panel {
@@ -606,15 +782,110 @@ header {
 /* ── 현관 CAM 카드 ── */
 #card-cam { --card-accent:#00C8FF; }
 
+/* PC: 3열 레이아웃 (스트림 | 스트림+스냅샷 | 인증+등록) */
+.cam-main-wrap {
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  gap:12px; align-items:stretch; min-height:0;
+}
 .cam-stream-wrap {
-  position:relative;
+  position:relative; min-width:0;
   background:#020608;
-  border-radius:4px;
+  border-radius:8px;
   overflow:hidden;
   aspect-ratio:4/3;
-  max-height:200px;
-  margin-bottom:10px;
+  max-height:220px;
 }
+.cam-col-mid, .cam-col-right {
+  display:flex; flex-direction:column;
+  gap:10px; justify-content:flex-start;
+}
+.cam-ts-box {
+  display:flex; flex-direction:column;
+  gap:6px; padding:12px;
+  background:var(--bg2);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:8px;
+  cursor:pointer; user-select:none;
+  transition:border-color .2s;
+}
+.cam-ts-box:hover { border-color:rgba(255,255,255,0.15); }
+.cam-ts-label {
+  font-size:0.75rem; color:var(--text2);
+}
+.cam-ts-box .ts-track {
+  width:44px; height:22px;
+  background:rgba(255,255,255,0.1);
+  border-radius:11px;
+  position:relative; cursor:pointer;
+  transition:background .2s;
+}
+.cam-ts-box .ts-track.on { background:var(--green); }
+.cam-ts-box .ts-thumb {
+  position:absolute; top:2px; left:2px;
+  width:18px; height:18px; border-radius:50%;
+  background:#fff; transition:transform .2s;
+}
+.cam-ts-box .ts-track.on .ts-thumb { left:2px; transform:translateX(22px); }
+.cam-ts-box .ts-val {
+  font-size:0.65rem; color:var(--text2);
+  font-family:var(--font-mono);
+}
+.cam-btn-box {
+  display:flex; align-items:center; gap:8px;
+  padding:12px 14px;
+  background:var(--bg2);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:8px;
+  font-size:0.75rem; color:var(--text2);
+  cursor:pointer; transition:all .2s;
+  text-align:left;
+}
+.cam-btn-box:hover:not(:disabled) {
+  border-color:rgba(255,255,255,0.2);
+  color:var(--text1);
+}
+.cam-btn-box:disabled {
+  opacity:0.4; cursor:not-allowed;
+}
+.cam-btn-box .cam-btn-icon { font-size:1rem; }
+.cam-btn-box .cam-btn-label { flex:1; }
+.cam-btn-box.snapshot {
+  color:var(--cyan); border-color:rgba(0,200,255,0.25);
+}
+.cam-btn-box.snapshot:hover:not(:disabled) {
+  background:rgba(0,200,255,0.06);
+  border-color:rgba(0,200,255,0.4);
+}
+.cam-btn-box.arm {
+  color:#9b8aff; border-color:rgba(108,92,231,0.4);
+}
+.cam-btn-box.arm:hover { background:rgba(108,92,231,0.08); }
+.cam-btn-box.arm.armed {
+  background:rgba(231,76,60,0.12);
+  border-color:var(--red); color:var(--red);
+}
+.cam-btn-box.register {
+  color:#00b894; border-color:rgba(0,184,148,0.4);
+}
+.cam-btn-box.register:hover { background:rgba(0,184,148,0.08); }
+
+/* 모바일: 스트림 위(가로 꽉 차게 4:3), 컨트롤 아래 2열 */
+@media (max-width:768px) {
+  .cam-main-wrap {
+    grid-template-columns:1fr;
+  }
+  .cam-stream-wrap {
+    width:100%; max-height:none;
+    aspect-ratio:4/3;
+  }
+  .cam-col-mid, .cam-col-right {
+    flex-direction:row; flex-wrap:wrap;
+    gap:8px;
+  }
+  .cam-ts-box { flex:1; min-width:120px; }
+  .cam-btn-box { flex:1; min-width:100px; }
+}
+
 .cam-stream-wrap img {
   width:100%; height:100%;
   object-fit:cover; display:block;
@@ -658,6 +929,13 @@ header {
 .cam-info-row {
   display:flex; justify-content:space-between; align-items:center;
   margin-bottom:8px;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.cam-raw-toggle {
+  font-size:0.7rem; color:var(--text2);
+  cursor:pointer; user-select:none;
+  display:flex; align-items:center; gap:5px;
 }
 .cam-status-wrap {
   display:flex; align-items:center; gap:6px;
@@ -681,6 +959,9 @@ header {
   cursor:pointer; transition:background .2s;
 }
 .cam-btn-snapshot:hover { background:rgba(0,200,255,0.15); }
+.cam-btn-snapshot:disabled {
+  opacity:0.4; cursor:not-allowed; color:var(--text2);
+}
 
 .cam-last-event {
   font-size:0.65rem; color:var(--text2);
@@ -1402,6 +1683,13 @@ header {
     <div class="logo-text">Voice <span>IoT</span> Controller</div>
   </div>
   <div class="header-right">
+    <div class="mic-select-wrap" id="micSelectWrap">
+      <label>🎤 MIC</label>
+      <select id="micSelect" title="마이크 장치 선택 (권한 허용 후 목록 표시)" style="max-width:200px;">
+        <option value="">마이크 권한 허용 필요</option>
+      </select>
+      <span class="mic-status" id="micStatus"></span>
+    </div>
     <div class="ws-status">
       <div class="ws-dot" id="wsDot"></div>
       <span id="wsLabel">WS 연결 중...</span>
@@ -1414,14 +1702,22 @@ header {
 
   <!-- 음성 컨트롤 패널 -->
   <div class="voice-panel">
-    <button class="mic-btn" id="micBtn" title="클릭: 브라우저 STT + 서버 STT 동시 활성화">🎙️</button>
+    <button class="mic-btn" id="micBtn" title="클릭 또는 터치: 음성 인식">🎙️</button>
     <div class="voice-info">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
         <div class="voice-label" style="margin:0;">VOICE COMMAND</div>
         <div class="voice-mode-badge" id="modeBadge">⬤ IDLE</div>
       </div>
-      <div class="voice-text placeholder" id="voiceText">버튼을 누르거나 "자비스야"라고 말하세요</div>
-      <div class="voice-result" id="voiceResult"></div>
+      <div class="voice-exchange">
+        <div class="voice-row">
+          <span class="voice-row-label">사용자</span>
+          <span class="voice-text placeholder" id="voiceUser">버튼을 누르거나 "자비스야"라고 말하세요</span>
+        </div>
+        <div class="voice-row">
+          <span class="voice-row-label">자비스</span>
+          <span class="voice-result empty" id="voiceResult">—</span>
+        </div>
+      </div>
     </div>
     <div class="manual-input-wrap">
       <input class="manual-input" id="manualInput" placeholder="수동 명령 입력 (예: 침실 불 켜줘)" />
@@ -1648,26 +1944,44 @@ header {
           </div>
         </div>
 
-        <!-- 스트림 영역 -->
-        <div class="cam-stream-wrap" id="camStreamWrap">
-          <div class="cam-placeholder" id="camPlaceholder">
-            <span>📷</span>
-            <span>스트림 연결 중...</span>
-            <span>UDP :5005</span>
+        <!-- 3열 레이아웃: 스트림 | 스트림+스냅샷 | 인증+등록 -->
+        <div class="cam-main-wrap">
+          <div class="cam-stream-wrap" id="camStreamWrap">
+            <div class="cam-placeholder" id="camPlaceholder">
+              <span>📷</span>
+              <span>스트림 연결 중...</span>
+              <span>UDP :5005</span>
+            </div>
+            <img id="camStream" src="" alt="현관 카메라"
+                 style="display:none;"
+                 onerror="onCamError()" onload="onCamLoad()">
+            <div class="cam-verdict-badge" id="camVerdictBadge"></div>
+            <div class="sg-overlay" id="sgOverlay"></div>
+            <div class="cam-rec-dot" id="camRecDot">
+              <span class="cam-rec-blink">●</span> LIVE
+            </div>
           </div>
-          <img id="camStream" src="" alt="현관 카메라"
-               style="display:none;"
-               onerror="onCamError()" onload="onCamLoad()">
-          <div class="cam-verdict-badge" id="camVerdictBadge"></div>
-          <div class="cam-rec-dot" id="camRecDot">
-            <span class="cam-rec-blink">●</span> LIVE
+          <div class="cam-col-mid">
+            <label class="cam-ts-box" onclick="camToggleStream()" id="camStreamTsItem">
+              <span class="cam-ts-label">스트림</span>
+              <div class="ts-track" id="camStreamTrack"><div class="ts-thumb"></div></div>
+              <span class="ts-val" id="camStreamVal">OFF</span>
+            </label>
+            <button class="cam-btn-box snapshot" id="camSnapshotBtn" onclick="camSnapshot()" disabled title="스트림 시작 후 사용">
+              <span class="cam-btn-icon">📸</span>
+              <span class="cam-btn-label">스냅샷</span>
+            </button>
           </div>
-        </div>
-
-        <!-- 하단 정보바 -->
-        <div class="cam-info-row">
-          <button class="cam-btn-snapshot" onclick="camSnapshot()">📸 스냅샷</button>
-          <button class="cam-btn-snapshot" onclick="camToggleStream()" id="camToggleBtn">▶ 스트림 시작</button>
+          <div class="cam-col-right">
+            <button class="cam-btn-box arm" id="sgArmBtn" onclick="sgToggleArm()">
+              <span class="cam-btn-icon">🔓</span>
+              <span class="cam-btn-label">인증</span>
+            </button>
+            <button class="cam-btn-box register" onclick="sgOpenRegisterModal()">
+              <span class="cam-btn-icon">👤</span>
+              <span class="cam-btn-label">얼굴 등록</span>
+            </button>
+          </div>
         </div>
         <div class="cam-last-event" id="camLastEvent">마지막 이벤트: —</div>
       </div>
@@ -1959,7 +2273,7 @@ header {
 // ════════════════════════════════════════════
 // WebSocket
 // ════════════════════════════════════════════
-const WS_URL = `ws://${location.host}/ws`;
+const WS_URL = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws';
 let ws = null;
 let wsRetryTimer = null;
 
@@ -1976,6 +2290,7 @@ function connectWS() {
 
   ws.onclose = () => {
     setWsStatus(false);
+    stopBrowserWakeStream();
     log('WebSocket 끊김 - 3초 후 재연결', 'warn');
     wsRetryTimer = setTimeout(connectWS, 3000);
   };
@@ -2013,7 +2328,11 @@ function setWsStatus(connected) {
 function handleServerMsg(data) {
   const type = data.type;
 
-  if (type === 'device_list') {
+  if (type === 'config') {
+    if (data.stt_wake_source) window._sttWakeSource = data.stt_wake_source;
+    if (window._sttWakeSource === 'browser') startBrowserWakeStream();
+  }
+  else if (type === 'device_list') {
     updateDeviceList(data.devices || []);
   }
   else if (type === 'device_update') {
@@ -2029,7 +2348,16 @@ function handleServerMsg(data) {
     const result = document.getElementById('voiceResult');
     result.textContent = icon + ' ' + data.msg;
     result.style.color = isOk ? 'var(--green)' : isFail ? 'var(--red)' : 'var(--text2)';
+    result.classList.remove('empty');
     log(data.msg, isOk ? 'ok' : 'fail');
+    // ── 사용자 말한 것: original_text (STT 원문) ─
+    const voiceUser = document.getElementById('voiceUser');
+    const userText = data.original_text || window._lastSttText || '';
+    if (userText) {
+      voiceUser.textContent = userText;
+      voiceUser.classList.remove('placeholder');
+      voiceUser.style.color = 'var(--text1)';
+    }
     // ── 욕실 온도: cmd_result에서 직접 처리 (안전장치) ──────────
     if (isOk && data.cmd === 'set_bathroom_temp' && data.value != null) {
       setBathroomTempDisplay(data.value);
@@ -2041,11 +2369,15 @@ function handleServerMsg(data) {
     // 4초 후 결과 클리어
     clearTimeout(window._cmdClearTimer);
     window._cmdClearTimer = setTimeout(() => clearVoiceResult(), 4000);
+    // 명령/자유응답 완료 후 조금 있다가 voiceUser를 초기 placeholder로 복원
+    clearTimeout(window._sttClearTimer);
+    clearTimeout(window._voicePlaceholderTimer);
+    window._voicePlaceholderTimer = setTimeout(() => clearVoiceText(), 2500);
   }
   else if (type === 'wake_detected') {
     setModeBadge('listening', '🎙 LISTENING');
-    document.getElementById('voiceText').textContent = '명령을 말씀하세요...';
-    document.getElementById('voiceText').classList.remove('placeholder');
+    document.getElementById('voiceUser').textContent = '명령을 말씀하세요...';
+    document.getElementById('voiceUser').classList.remove('placeholder');
     document.getElementById('micBtn').classList.add('active');
     log('웨이크 워드 감지 → 명령 대기 중', 'info');
   }
@@ -2054,16 +2386,15 @@ function handleServerMsg(data) {
     log('명령 대기 시간 초과 → IDLE', 'warn');
   }
   else if (type === 'stt_result') {
-    const text = data.text || '';
-    const voiceText = document.getElementById('voiceText');
-    voiceText.textContent = '🔄 ' + text;
-    voiceText.classList.remove('placeholder');
-    voiceText.style.color = 'var(--cyan)';
+    // STT 결과를 바로 표시하지 않음 — cmd_result에서 LLM 판단 후 표시
+    const voiceUser = document.getElementById('voiceUser');
+    voiceUser.textContent = '🔄 처리 중...';
+    voiceUser.classList.remove('placeholder');
+    voiceUser.style.color = 'var(--cyan)';
     setModeIdle();
-    log('🎙️ STT: "' + text + '"', 'info');
-    // 3초 후 자동 클리어 → 힌트 복원
-    clearTimeout(window._sttClearTimer);
-    window._sttClearTimer = setTimeout(() => clearVoiceText(), 3000);
+    log('🎙️ STT 인식됨 (LLM 판단 대기)', 'info');
+    // 원문 저장 (cmd_result unknown 시 사용)
+    window._lastSttText = data.text || '';
   }
   else if (type === 'music_control') {
     handleMusicControl(data.action, data.value);
@@ -2086,6 +2417,12 @@ function handleServerMsg(data) {
   }
   else if (type === 'cam_verdict') {
     handleCamVerdict(data);
+  }
+  else if (type === 'smartgate_overlay') {
+    handleSmartGateOverlay(data);
+  }
+  else if (type === 'smartgate') {
+    handleSmartGateEvent(data);
   }
   else if (type === 'bathroom_temp_set') {
     setBathroomTempDisplay(data.value);
@@ -2367,6 +2704,12 @@ function sendVoiceText(text) {
 document.getElementById('sendBtn').onclick = () => {
   const text = document.getElementById('manualInput').value.trim();
   if (!text) return;
+  document.getElementById('voiceUser').textContent = text;
+  document.getElementById('voiceUser').classList.remove('placeholder');
+  document.getElementById('voiceUser').style.color = 'var(--text1)';
+  document.getElementById('voiceResult').textContent = '🔄 처리 중...';
+  document.getElementById('voiceResult').classList.remove('empty');
+  document.getElementById('voiceResult').style.color = 'var(--cyan)';
   sendVoiceText(text);
   document.getElementById('manualInput').value = '';
 };
@@ -2396,15 +2739,15 @@ function initSpeech() {
   recognition.onstart = () => {
     isListening = true;
     document.getElementById('micBtn').classList.add('active');
-    document.getElementById('voiceText').textContent = '듣는 중...';
-    document.getElementById('voiceText').classList.remove('placeholder');
+    document.getElementById('voiceUser').textContent = '듣는 중...';
+    document.getElementById('voiceUser').classList.remove('placeholder');
   };
 
   recognition.onresult = (e) => {
     const results = e.results;
     const text = results[results.length - 1][0].transcript;
     const isFinal = results[results.length - 1].isFinal;
-    document.getElementById('voiceText').textContent = text;
+    document.getElementById('voiceUser').textContent = text;
     if (isFinal) sendVoiceText(text);
   };
 
@@ -2432,7 +2775,7 @@ function setModeIdle() {
 }
 
 function clearVoiceText() {
-  const el = document.getElementById('voiceText');
+  const el = document.getElementById('voiceUser');
   el.textContent = '버튼을 누르거나 "자비스야"라고 말하세요';
   el.classList.add('placeholder');
   el.style.color = '';
@@ -2440,7 +2783,8 @@ function clearVoiceText() {
 
 function clearVoiceResult() {
   const el = document.getElementById('voiceResult');
-  el.textContent = '';
+  el.textContent = '—';
+  el.classList.add('empty');
   el.style.color = '';
 }
 
@@ -2460,30 +2804,156 @@ async function activateServerSTT() {
   }
 }
 
-// ── 마이크 버튼 (버튼 모드 + 웨이크 워드 모드 공존) ──────────────
-document.getElementById('micBtn').onclick = async () => {
-  if (!recognition) { initSpeech(); }
+// ── 브라우저 마이크 캡처 → 서버 Whisper 전사 ─────────────────────
+let _browserMicRecorder = null;
+let _browserMicChunks = [];
 
-  if (isListening) {
-    // 브라우저 STT 중단
-    if (recognition) recognition.stop();
-    setModeIdle();
+async function captureAndTranscribeBrowserMic() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const msg = '원격 접속 시 HTTPS가 필요합니다. 브라우저 마이크는 보안 연결(HTTPS)에서만 사용 가능합니다.';
+    log(msg, 'fail');
+    showToast(msg, 'fail', 5000);
     return;
   }
-
-  // 1. 브라우저 Web Speech API STT 시작
-  if (recognition) {
-    try {
-      recognition.start();
-      setModeBadge('listening', '🎙 LISTENING');
-    } catch(e) {
-      log('브라우저 STT 시작 오류: ' + e.message, 'warn');
-    }
-  }
-
-  // 2. 서버 STT(Whisper) activate 동시 호출
   await activateServerSTT();
+
+  const deviceId = (_browserMicDeviceId && _browserMicDeviceId !== '') ? _browserMicDeviceId : undefined;
+  const constraints = {
+    audio: {
+      deviceId: deviceId ? { exact: deviceId } : undefined,
+      sampleRate: 16000,
+      channelCount: 1,
+    },
+  };
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const sampleRate = ctx.sampleRate;
+    const source = ctx.createMediaStreamSource(stream);
+    const bufferSize = 4096;
+    const processor = ctx.createScriptProcessor(bufferSize, 1, 1);
+    const chunks = [];
+    const VAD_ENERGY_THRESH = 0.02;
+    const VAD_SILENCE_MS = 800;
+    const MAX_WAIT_MS = 5000;
+    const MAX_SPEECH_MS = 15000;
+
+    let speechStarted = false;
+    let lastSpeechAt = 0;
+    let startTime = Date.now();
+    let resolveCapture = null;
+    const chunkInterval = (bufferSize / sampleRate) * 1000;
+
+    processor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      let energy = 0;
+      for (let i = 0; i < input.length; i++) energy += input[i] * input[i];
+      energy = Math.sqrt(energy / input.length);
+
+      const int16 = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      chunks.push(int16);
+
+      const now = Date.now();
+      if (energy > VAD_ENERGY_THRESH) {
+        lastSpeechAt = now;
+        if (!speechStarted) speechStarted = true;
+      }
+
+      if (speechStarted) {
+        const silenceMs = now - lastSpeechAt;
+        if (silenceMs >= VAD_SILENCE_MS && chunks.length > 15) {
+          if (resolveCapture) { resolveCapture(); resolveCapture = null; }
+          return;
+        }
+        if (now - startTime > MAX_SPEECH_MS) {
+          if (resolveCapture) { resolveCapture(); resolveCapture = null; }
+          return;
+        }
+      } else if (now - startTime > MAX_WAIT_MS) {
+        if (resolveCapture) { resolveCapture(); resolveCapture = null; }
+        return;
+      }
+    };
+
+    source.connect(processor);
+    processor.connect(ctx.destination);
+
+    setModeBadge('listening', '🎙 말씀해 주세요 (5초 대기)');
+    document.getElementById('voiceUser').textContent = '말을 시작하면 녹음됩니다. 다시 클릭해 중지';
+    document.getElementById('voiceUser').classList.remove('placeholder');
+
+    await new Promise((resolve) => {
+      _browserMicRecorder = { stop: () => { resolveCapture = null; resolve(); } };
+      resolveCapture = resolve;
+    });
+
+    processor.disconnect();
+    source.disconnect();
+    stream.getTracks().forEach((t) => t.stop());
+
+    if (chunks.length === 0) {
+      setModeIdle();
+      return;
+    }
+    if (!speechStarted) {
+      setModeIdle();
+      document.getElementById('voiceUser').textContent = '말을 시작하지 않았습니다';
+      log('5초 내 말을 시작하지 않음', 'warn');
+      return;
+    }
+
+    const totalLen = chunks.reduce((a, c) => a + c.length, 0);
+    const merged = new Int16Array(totalLen);
+    let offset = 0;
+    for (const c of chunks) {
+      merged.set(c, offset);
+      offset += c.length;
+    }
+
+    // 5초 분량은 인자 개수 한도 초과 → apply 대신 청크 단위로 문자열 생성 (Maximum call stack 방지)
+    const u8 = new Uint8Array(merged.buffer);
+    const CHUNK = 8192;
+    let binary = '';
+    for (let i = 0; i < u8.length; i += CHUNK) {
+      const slice = u8.subarray(i, Math.min(i + CHUNK, u8.length));
+      binary += String.fromCharCode.apply(null, slice);
+    }
+    const base64 = btoa(binary);
+    const res = await fetch('/stt/transcribe-audio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio: base64, sample_rate: sampleRate }),
+    });
+    const data = await res.json();
+    const text = (data.text || '').trim();
+
+    setModeIdle();
+    document.getElementById('voiceUser').textContent = text || '인식되지 않음';
+    if (text) {
+      sendVoiceText(text);
+    } else {
+      log('음성 인식 결과 없음', 'warn');
+    }
+  } catch (e) {
+    log(`브라우저 마이크 오류: ${e.message}`, 'fail');
+    setModeIdle();
+  }
+  _browserMicRecorder = null;
+}
+
+// ── 마이크 버튼 (브라우저 마이크 전용) ─────────────────────────────
+document.getElementById('micBtn').onclick = async () => {
+  if (_browserMicRecorder) {
+    _browserMicRecorder.stop();
+    return;
+  }
+  await captureAndTranscribeBrowserMic();
 };
+
 
 // ════════════════════════════════════════════
 // 희망 온도 제어
@@ -2543,7 +3013,14 @@ function setBathroomTempDisplay(value) {
   const input = document.getElementById('target-bathroom');
   if (input) input.value = val.toFixed(1);
 
-
+  // 희망 온도 디스플레이(btd-target-val) 동기화 (난방 ON일 때)
+  if (_heatingOn) {
+    const targetVal  = document.getElementById('btd-target-val');
+    const targetUnit = document.getElementById('btd-target-unit');
+    if (targetVal)  { targetVal.textContent = val.toFixed(1); targetVal.className = 'btd-value btd-on'; }
+    if (targetUnit) targetUnit.textContent = '°C';
+  }
+  updateHeatingActiveStyle();
   log(`🌡️ 욕실 희망온도 → ${val.toFixed(1)}°C`, 'ok');
 }
 
@@ -3694,12 +4171,150 @@ function renderAnomalies(items) {
 }
 
 // ════════════════════════════════════════════
+// 마이크 선택 (브라우저 마이크: 장치 선택 + 권한 허용/거부)
+// ════════════════════════════════════════════
+let _browserMicStream = null;
+let _browserMicDeviceId = '';
+
+async function loadBrowserMicDevices() {
+  const sel = document.getElementById('micSelect');
+  const statusEl = document.getElementById('micStatus');
+  sel.innerHTML = '<option value="">마이크 권한 허용 필요</option>';
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const isSecure = window.isSecureContext;
+    statusEl.textContent = isSecure
+      ? '브라우저가 마이크를 지원하지 않습니다.'
+      : '원격 접속 시 HTTPS가 필요합니다. (http → https)';
+    statusEl.className = 'mic-status fail';
+    log('🎤 mediaDevices 없음: ' + (isSecure ? '브라우저 미지원' : 'HTTPS 필요 (보안 컨텍스트)'), 'warn');
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop());
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter(d => d.kind === 'audioinput');
+
+    sel.innerHTML = '';
+    inputs.forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `마이크 ${i + 1}`;
+      if (i === 0) opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+    _browserMicDeviceId = inputs[0]?.deviceId || '';
+    statusEl.textContent = '';
+    statusEl.className = 'mic-status';
+    log(`🎤 브라우저 마이크: ${inputs.length}개 (권한 허용됨)`, 'info');
+    if (window._sttWakeSource === 'browser' && ws?.readyState === WebSocket.OPEN) startBrowserWakeStream();
+  } catch (e) {
+    statusEl.textContent = '마이크 권한을 허용해주세요.';
+    statusEl.className = 'mic-status fail';
+    log(`🎤 마이크 권한 필요: ${e.message}`, 'warn');
+  }
+}
+
+document.getElementById('micSelect').addEventListener('change', function() {
+  _browserMicDeviceId = this.value || '';
+  if (window._sttWakeSource === 'browser' && _browserWakeStream) {
+    stopBrowserWakeStream();
+    startBrowserWakeStream();
+  }
+});
+
+// ── 브라우저 마이크 웨이크 스트림 (wake_source=browser 시 서버로 오디오 전송) ─
+let _browserWakeStream  = null;
+let _browserWakeProcessor = null;
+let _browserWakeCtx     = null;
+const WAKE_CHUNK_SAMPLES = 512;  // Porcupine frame size
+const TARGET_SAMPLE_RATE = 16000;
+
+function stopBrowserWakeStream() {
+  if (_browserWakeProcessor) {
+    try { _browserWakeProcessor.disconnect(); } catch (_) {}
+    _browserWakeProcessor = null;
+  }
+  if (_browserWakeStream) {
+    _browserWakeStream.getTracks().forEach(t => t.stop());
+    _browserWakeStream = null;
+  }
+  _browserWakeCtx = null;
+}
+
+async function startBrowserWakeStream() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || window._sttWakeSource !== 'browser') return;
+  if (_browserWakeStream) return;
+  if (!navigator.mediaDevices?.getUserMedia) return;
+
+  try {
+    const deviceId = _browserMicDeviceId || undefined;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: deviceId ? { ideal: deviceId } : undefined,
+        sampleRate: { ideal: TARGET_SAMPLE_RATE },
+        channelCount: 1,
+      },
+    });
+    _browserWakeStream = stream;
+
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: TARGET_SAMPLE_RATE });
+    _browserWakeCtx = ctx;
+    if (ctx.sampleRate !== TARGET_SAMPLE_RATE) {
+      console.warn('[Wake] AudioContext 샘플레이트:', ctx.sampleRate, '(목표 16kHz)');
+    }
+
+    const source = ctx.createMediaStreamSource(stream);
+    const bufferSize = 2048;
+    const processor = ctx.createScriptProcessor(bufferSize, 1, 1);
+    _browserWakeProcessor = processor;
+
+    const sendChunk = (int16Arr) => {
+      if (ws?.readyState !== WebSocket.OPEN) return;
+      const u8 = new Uint8Array(int16Arr.buffer);
+      const b64 = btoa(String.fromCharCode.apply(null, u8));
+      sendWS({ type: 'audio_chunk', data: b64 });
+    };
+
+    processor.onaudioprocess = (e) => {
+      let input = e.inputBuffer.getChannelData(0);
+      if (ctx.sampleRate === 48000) {
+        const out = new Float32Array(Math.floor(input.length / 3));
+        for (let i = 0; i < out.length; i++) out[i] = input[i * 3];
+        input = out;
+      }
+      const int16 = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      for (let i = 0; i < int16.length; i += WAKE_CHUNK_SAMPLES) {
+        if (i + WAKE_CHUNK_SAMPLES <= int16.length) {
+          sendChunk(int16.subarray(i, i + WAKE_CHUNK_SAMPLES));
+        }
+      }
+    };
+
+    source.connect(processor);
+    processor.connect(ctx.destination);
+    log('🎤 웨이크 스트림 시작 (브라우저 마이크 → 서버)', 'info');
+  } catch (e) {
+    log('웨이크 스트림 시작 실패: ' + e.message, 'warn');
+    _browserWakeStream = null;
+  }
+}
+
+// ════════════════════════════════════════════
 // 초기화
 // ════════════════════════════════════════════
 window.onload = () => {
   log('Voice IoT Controller 시작', 'info');
   initSpeech();
   connectWS();
+  loadBrowserMicDevices();
   updateTrackUI();
   loadYouTubeAPI();
   drawHouse();  // 3D 하우스 초기 렌더링
@@ -3759,6 +4374,18 @@ function showToast(msg, type = 'ok', duration = 3000) {
 // 현관 ESP32-CAM 카메라 모듈
 // ════════════════════════════════════════════
 let _camStreaming  = false;
+
+// 얼굴 인증 모드 시 오버레이 스트림, 그 외에는 raw(지연 최소)
+function camStreamUrl() {
+  return _sgArmed ? '/camera/entrance/stream' : '/camera/entrance/raw';
+}
+
+function camRefreshStreamIfActive() {
+  if (_camStreaming) {
+    const img = document.getElementById('camStream');
+    if (img) img.src = camStreamUrl() + '?' + Date.now();
+  }
+}
 let _camAlarmOsc  = null;
 let _audioCtx     = null;
 
@@ -3771,12 +4398,16 @@ function _getAudioCtx() {
 function camToggleStream() {
   const img    = document.getElementById('camStream');
   const ph     = document.getElementById('camPlaceholder');
-  const btn    = document.getElementById('camToggleBtn');
+  const track  = document.getElementById('camStreamTrack');
+  const val    = document.getElementById('camStreamVal');
+  const snapBtn = document.getElementById('camSnapshotBtn');
   if (_camStreaming) {
     img.src = '';
     img.style.display = 'none';
     ph.style.display  = 'flex';
-    btn.textContent   = '▶ 스트림 시작';
+    if (track) track.className = 'ts-track';
+    if (val)   { val.textContent = 'OFF'; val.className = 'ts-val'; }
+    if (snapBtn) snapBtn.disabled = true;
     document.getElementById('camRecDot').classList.remove('active');
     document.getElementById('camDot').className = 'cam-dot offline';
     document.getElementById('camStatusText').textContent = '대기 중';
@@ -3786,8 +4417,10 @@ function camToggleStream() {
   } else {
     ph.style.display  = 'none';
     img.style.display = 'block';
-    img.src = '/camera/entrance/stream?' + Date.now();
-    btn.textContent = '■ 스트림 중지';
+    img.src = camStreamUrl() + '?' + Date.now();
+    if (track) track.className = 'ts-track on';
+    if (val)   { val.textContent = 'ON'; val.className = 'ts-val ts-val-on'; }
+    if (snapBtn) snapBtn.disabled = false;
     _camStreaming = true;
     showToast('📷 현관 카메라 스트림 연결 중...', 'cam', 2500);
     log('📷 현관 카메라 스트림 시작', 'info');
@@ -3812,7 +4445,7 @@ function onCamError() {
   if (_camStreaming) {
     setTimeout(() => {
       const img = document.getElementById('camStream');
-      img.src = '/camera/entrance/stream?' + Date.now();
+      img.src = camStreamUrl() + '?' + Date.now();
     }, 5000);
   }
 }
@@ -4026,9 +4659,276 @@ function playDeliveryBeep() {
   osc.start();
   osc.stop(ctx.currentTime + 0.5);
 }
+// ════ SMARTGATE OVERLAY MODULE (v1.8) ═════════
+const _sgChallengeText = {
+  blink:      '👀 눈을 깜빡이세요',
+  yaw:        '↔️ 고개를 좌우로 돌리세요',
+  nod:        '↕️ 고개를 끄덕이세요',
+  mouth_open: '😮 입을 크게 벌리세요',
+};
+
+let _sgArmed = false;
+
+async function sgToggleArm() {
+  const btn = document.getElementById('sgArmBtn');
+  if (!_sgArmed) {
+    try {
+      const res = await fetch('/smartgate/arm', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        _sgArmed = true;
+        btn.textContent = '🔴 취소';
+        btn.classList.add('armed');
+        camRefreshStreamIfActive();
+        log('🟢 [SmartGate] 인증 시작 — 카메라를 바라보세요', 'ok');
+        showToast('🔐 SmartGate 인증 시작 — 카메라를 바라보세요', 'ok', 3000);
+      } else {
+        log('⚠️ [SmartGate] ' + (data.msg || 'ARM 실패'), 'fail');
+        showToast(data.msg || 'ARM 실패', 'fail', 3000);
+      }
+    } catch (e) {
+      log('⚠️ [SmartGate] ARM 요청 실패', 'fail');
+    }
+  } else {
+    try {
+      const res = await fetch('/smartgate/disarm', { method: 'POST' });
+      const data = await res.json();
+      _sgArmed = false;
+      btn.textContent = '🔓 인증';
+      btn.classList.remove('armed');
+      camRefreshStreamIfActive();
+      log('🔴 [SmartGate] 인증 취소', 'info');
+    } catch (e) {
+      log('⚠️ [SmartGate] DISARM 요청 실패', 'fail');
+    }
+  }
+}
+
+function _sgResetArmBtn() {
+  _sgArmed = false;
+  const btn = document.getElementById('sgArmBtn');
+  if (btn) {
+    btn.textContent = '🔓 인증';
+    btn.classList.remove('armed');
+  }
+  camRefreshStreamIfActive();
+}
+
+function handleSmartGateOverlay(data) {
+  const overlay = document.getElementById('sgOverlay');
+  const state   = data.state || 'IDLE';
+
+  if (state === 'IDLE') {
+    overlay.classList.remove('active');
+    overlay.innerHTML = '';
+    _sgResetArmBtn();
+    return;
+  }
+
+  overlay.classList.add('active');
+  overlay.innerHTML = '';
+
+  const bannerDiv = document.createElement('div');
+  bannerDiv.className = 'sg-overlay-banner';
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'sg-overlay-msg';
+  const challengeDiv = document.createElement('div');
+  challengeDiv.className = 'sg-overlay-challenge';
+  const userDiv = document.createElement('div');
+  userDiv.className = 'sg-overlay-user';
+
+  if (state === 'ARMED') {
+    bannerDiv.classList.add('liveness');
+    bannerDiv.textContent = '🔐 스마트게이트 — 인증 준비';
+    msgDiv.textContent = '카메라를 정면으로 바라봐 주세요';
+    challengeDiv.textContent = '📷 얼굴 인식 대기 중...';
+    overlay.append(bannerDiv, msgDiv, challengeDiv);
+  }
+  else if (state === 'LIVENESS') {
+    bannerDiv.classList.add('liveness');
+    bannerDiv.textContent = '🔐 스마트게이트 — 생체 인증';
+    msgDiv.textContent = data.msg || '챌린지 진행 중...';
+    const ch = data.challenge || '';
+    challengeDiv.textContent = _sgChallengeText[ch] || ch;
+    if (data.user) userDiv.textContent = 'User: ' + data.user;
+    overlay.append(bannerDiv, msgDiv, challengeDiv, userDiv);
+  }
+  else if (state === 'FACE_OK') {
+    bannerDiv.classList.add('face-ok');
+    bannerDiv.textContent = '✋ 스마트게이트 — 제스처 인증';
+    const seq = data.sequence || [];
+    msgDiv.textContent = '시퀀스: [' + seq.join(' → ') + ']';
+    challengeDiv.textContent = '🖐️ 손가락 수신호를 보여주세요';
+    if (data.user) userDiv.textContent = 'User: ' + data.user;
+    overlay.append(bannerDiv, msgDiv, challengeDiv, userDiv);
+  }
+  else if (state === 'GESTURE_OK') {
+    bannerDiv.classList.add('gesture-ok');
+    bannerDiv.textContent = '✅ 인증 성공';
+    const successDiv = document.createElement('div');
+    successDiv.className = 'sg-overlay-success';
+    successDiv.innerHTML =
+      '<div class="sg-success-icon">🚪</div>' +
+      '<div class="sg-success-text">' +
+      (data.user ? data.user + '님, 환영합니다!' : '인증 성공') +
+      '</div>';
+    overlay.append(bannerDiv, successDiv);
+  }
+  else if (state === 'LOCKED') {
+    bannerDiv.classList.add('locked');
+    bannerDiv.textContent = '🚫 접근 거부';
+    const lockDiv = document.createElement('div');
+    lockDiv.className = 'sg-overlay-locked';
+    lockDiv.innerHTML =
+      '<div class="sg-lock-icon">🔒</div>' +
+      '<div class="sg-lock-text">' + (data.msg || '잠금 상태') + '</div>';
+    overlay.append(bannerDiv, lockDiv);
+  }
+}
+
+function handleSmartGateEvent(data) {
+  const event = data.event || '';
+  const ts = new Date((data.timestamp || Date.now()/1000) * 1000)
+               .toLocaleTimeString('ko-KR', {hour12:false});
+
+  if (event === 'armed') {
+    log('🟢 [SmartGate] 인증 준비 — ' + (data.timeout_sec || 30) + '초 내 카메라를 바라보세요', 'ok');
+  }
+  else if (event === 'disarmed') {
+    log('🔴 [SmartGate] 인증 취소', 'info');
+    _sgResetArmBtn();
+  }
+  else if (event === 'arm_timeout') {
+    log('⏰ [SmartGate] 인증 대기 타임아웃 → 대기 모드', 'info');
+    showToast('⏰ SmartGate 인증 대기 시간 초과', 'fail', 3000);
+    _sgResetArmBtn();
+  }
+  else if (event === 'face_ok') {
+    log('🔐 [SmartGate] 얼굴 인식: ' + (data.user || '') +
+        ' (sim=' + (data.similarity || 0) + ')', 'ok');
+  }
+  else if (event === 'liveness_fail') {
+    log('❌ [SmartGate] Liveness 실패: ' + (data.msg || '타임아웃'), 'fail');
+  }
+  else if (event === 'auth_success') {
+    log('✅ [SmartGate] 2FA 인증 성공! 사용자: ' + (data.user || '') +
+        ' | 시퀀스: [' + (data.sequence || []).join(',') + ']', 'ok');
+    showToast('🚪 SmartGate 인증 성공 — 현관문 열림', 'ok', 4000);
+    document.getElementById('camLastEvent').textContent =
+      '마지막: 🚪 SmartGate 인증 성공 (' + ts + ')';
+  }
+  else if (event === 'gate_open') {
+    log('🚪 [SmartGate] 게이트 열림 — ' + (data.open_duration_sec || 5) + '초 후 자동 닫힘', 'ok');
+  }
+  else if (event === 'lockout_start') {
+    log('🔒 [SmartGate] 잠금! ' + (data.lockout_sec || 30) + '초 대기', 'fail');
+    showToast('🔒 SmartGate 잠금 — 연속 실패', 'fail', 5000);
+    document.getElementById('camLastEvent').textContent =
+      '마지막: 🔒 SmartGate 잠금 (' + ts + ')';
+  }
+  else if (event === 'gate_closed') {
+    log('🚪 [SmartGate] 게이트 닫힘 — 대기 모드', 'info');
+    _sgResetArmBtn();
+    // 오버레이 초기화
+    const overlay = document.getElementById('sgOverlay');
+    if (overlay) { overlay.classList.remove('active'); overlay.innerHTML = ''; }
+  }
+  else if (event === 'welcome_triggered') {
+    log('🏠 [SmartGate] 환영! ' + (data.user || '') + '님 귀가 — 조명 ON + TTS', 'ok');
+    showToast('🏠 ' + (data.user || '사용자') + '님 어서오세요!', 'ok', 4000);
+  }
+}
+// ════ END SMARTGATE MODULE ═══════════════════
+
+// ════ SMARTGATE FACE REGISTER MODULE (v1.9) ═══
+async function sgOpenRegisterModal() {
+  document.getElementById('sgRegisterModal').classList.add('active');
+  document.getElementById('sgRegName').value = '';
+  document.getElementById('sgRegInfo').textContent = '카메라를 바라보고 캡처 버튼을 누르세요.';
+  document.getElementById('sgRegInfo').className = 'sg-register-info';
+  document.getElementById('sgRegCount').textContent = '';
+  await sgLoadRegisteredFaces();
+}
+function sgCloseRegisterModal() {
+  document.getElementById('sgRegisterModal').classList.remove('active');
+}
+async function sgCaptureFace() {
+  const name = document.getElementById('sgRegName').value.trim();
+  const info = document.getElementById('sgRegInfo');
+  if (!name) { info.textContent='\u26a0\ufe0f 사용자 이름을 입력하세요'; info.className='sg-register-info fail'; return; }
+  info.textContent='\ud83d\udcf8 캡처 중...'; info.className='sg-register-info';
+  try {
+    const res = await fetch('/smartgate/register-face', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:name}) });
+    const data = await res.json();
+    if (data.status==='ok') {
+      info.textContent=data.msg; info.className='sg-register-info ok';
+      document.getElementById('sgRegCount').textContent='등록 이미지: '+data.count+'장';
+      log('\ud83d\udcf8 [SmartGate] 얼굴 등록: '+data.name+' ('+data.count+'장)','ok');
+      await sgLoadRegisteredFaces();
+    } else { info.textContent='\u274c '+(data.msg||'등록 실패'); info.className='sg-register-info fail'; }
+  } catch(e) { info.textContent='\u274c 서버 연결 실패'; info.className='sg-register-info fail'; }
+}
+async function sgReloadFaces() {
+  const info = document.getElementById('sgRegInfo');
+  info.textContent='\ud83d\udd04 재임베딩 중...'; info.className='sg-register-info';
+  try {
+    const res = await fetch('/smartgate/reload-faces',{method:'POST'});
+    const data = await res.json();
+    info.textContent='\u2705 '+(data.msg||'재임베딩 완료'); info.className='sg-register-info ok';
+    log('\ud83d\udd04 [SmartGate] 얼굴 DB 재임베딩 완료','ok');
+  } catch(e) { info.textContent='\u274c 재임베딩 실패'; info.className='sg-register-info fail'; }
+}
+async function sgLoadRegisteredFaces() {
+  const listDiv = document.getElementById('sgRegList');
+  try {
+    const res = await fetch('/smartgate/registered-faces');
+    const data = await res.json();
+    if (!data.users||data.users.length===0) { listDiv.innerHTML='<div style="color:#666;font-size:0.8rem;">등록된 사용자 없음</div>'; return; }
+    listDiv.innerHTML = data.users.map(function(u){
+      return '<div class="sg-user-row"><span>\ud83d\udc64 '+u.name+' ('+u.count+'장)</span>'+
+        '<button class="sg-user-del" onclick="sgDeleteFace(\''+u.name+'\')">삭제</button></div>';
+    }).join('');
+  } catch(e) { listDiv.innerHTML='<div style="color:#e74c3c;font-size:0.8rem;">목록 로드 실패</div>'; }
+}
+async function sgDeleteFace(name) {
+  if (!confirm(name+' 사용자의 등록 얼굴을 모두 삭제하시겠습니까?')) return;
+  try {
+    const res = await fetch('/smartgate/registered-faces/'+name,{method:'DELETE'});
+    const data = await res.json();
+    if (data.status==='ok') { log('\ud83d\uddd1\ufe0f [SmartGate] 얼굴 삭제: '+name,'info'); showToast('\ud83d\uddd1\ufe0f '+name+' 삭제 완료','ok',3000); await sgLoadRegisteredFaces(); }
+    else { showToast(data.msg||'삭제 실패','fail',3000); }
+  } catch(e) { showToast('서버 연결 실패','fail',3000); }
+}
+// ════ END FACE REGISTER MODULE ═══════════════
+
 // ════ END CAM MODULE ═══════════════════════════
 </script>
 
 <div class="toast-container" id="toastContainer"></div>
+
+<!-- SmartGate 얼굴 등록 모달 -->
+<div class="sg-register-modal" id="sgRegisterModal">
+  <div class="sg-register-content">
+    <div class="sg-register-header">
+      <span>👤 SmartGate 얼굴 등록</span>
+      <button class="sg-register-close" onclick="sgCloseRegisterModal()">✕</button>
+    </div>
+    <div class="sg-register-body">
+      <div class="sg-register-input-row">
+        <label>사용자 이름</label>
+        <input type="text" id="sgRegName" placeholder="예: stephen" autocomplete="off">
+      </div>
+      <div class="sg-register-info" id="sgRegInfo">
+        카메라를 바라보고 캡처 버튼을 누르세요.
+      </div>
+      <div class="sg-register-count" id="sgRegCount"></div>
+      <div class="sg-register-actions">
+        <button class="sg-btn-capture" onclick="sgCaptureFace()">📸 캡처</button>
+        <button class="sg-btn-reload" onclick="sgReloadFaces()">🔄 재임베딩</button>
+      </div>
+      <div class="sg-register-list" id="sgRegList"></div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

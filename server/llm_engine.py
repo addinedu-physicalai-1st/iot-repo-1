@@ -104,12 +104,14 @@ Available commands:
   {"cmd": "status", "device_id": "esp32_home", "room": "<room>"|"all", "target": "led"|"servo"|"all"}
   {"cmd": "led",    "device_id": "all", "state": "on"|"off"}  ← 전체 전등 제어
   {"cmd": "all_off", "device_id": "all"}  ← 전체 전등 + 음악 동시 끄기
-  {"cmd": "all_on",  "device_id": "all"}  ← 전체 전등 + 음악 동시 켜기
+  {"cmd": "all_on",  "device_id": "all"}  ← 전체 전등만 켜기 (음악 포함 X)
   {"cmd": "away_mode",  "device_id": "esp32_home"}  ← 외출 (PIR 방범 ON + 전체 조명 OFF)
   {"cmd": "home_mode",  "device_id": "esp32_home"}  ← 귀가 (PIR 재실 감지 ON)
   {"cmd": "sleep_mode", "device_id": "esp32_home"}  ← 취침 (PIR 거실 방범 ON)
   {"cmd": "wake_mode",  "device_id": "esp32_home"}  ← 기상 (PIR 재실 감지 ON)
-  {"cmd": "set_bathroom_temp",   "device_id": "esp32_home", "value": <10.0-40.0>}  ← 욕실 희망온도 설정
+  {"cmd": "dnd_mode",   "device_id": "esp32_home"}  ← 방해금지 (알람·팝업 무시, 로그 유지)
+  {"cmd": "heating",             "device_id": "esp32_home", "room": "bathroom", "state": "on"|"off"}  ← 욕실 난방 ON/OFF
+  {"cmd": "set_bathroom_temp",   "device_id": "esp32_home", "value": <10.0-40.0>}  ← 욕실 희망온도 설정 (자동으로 난방 ON 포함)
   {"cmd": "query_bathroom_temp", "device_id": "esp32_home"}                         ← 욕실 현재온도 조회 (센서 없음 → 희망온도 안내)
 
 Servo angle presets:
@@ -130,21 +132,34 @@ Rules:
   3. Always include "room" field for single-room commands.
   4. For whole-home LED: use "device_id": "all" without "room".
   4-1. For whole-home power OFF (전등+음악 동시): use cmd: "all_off", "device_id": "all".
-  4-2. For whole-home power ON  (전등+음악 동시): use cmd: "all_on",  "device_id": "all".
-  4-3. PIR mode keywords:
-     - 외출 / 나갈게 / 외출해           → cmd: "away_mode",  device_id: "esp32_home"
-     - 귀가 / 돌아왔어 / 집에 왔어      → cmd: "home_mode",  device_id: "esp32_home"
-     - 잘게 / 취침 / 자러 갈게          → cmd: "sleep_mode", device_id: "esp32_home"
-     - 일어났어 / 기상 / 아침이야       → cmd: "wake_mode",  device_id: "esp32_home"
+  4-2. For whole-home lights ON (전등만): use cmd: "all_on", "device_id": "all". (음악은 포함하지 않음)
+  4-3. PIR mode keywords (보안 모드 / 방범 모드):
+     - 외출 / 나갈게 / 외출해 / 외출 모드 / 보안 모드 외출     → cmd: "away_mode",  device_id: "esp32_home"
+     - 귀가 / 돌아왔어 / 집에 왔어 / 귀가 모드 / 보안 모드 귀가  → cmd: "home_mode",  device_id: "esp32_home"
+     - 잘게 / 취침 / 자러 갈게 / 취침 모드 / 보안 모드 취침     → cmd: "sleep_mode", device_id: "esp32_home"
+     - 일어났어 / 기상 / 아침이야 / 기상 모드 / 보안 모드 기상  → cmd: "wake_mode",  device_id: "esp32_home"
+     - 방해금지 / 방해금지 모드 / 보안 모드 끄기 / 알람 끄기    → cmd: "dnd_mode",   device_id: "esp32_home"
   4-4. Bathroom temperature keywords:
      - 욕실 / 목욕탕 + 온도 / 온도 설정 / 도로 맞춰줘 + <숫자>  → cmd: "set_bathroom_temp", value: <숫자>
+       (set_bathroom_temp는 자동으로 난방도 ON 시킴 — heating 명령을 따로 보낼 필요 없음)
      - 예: "욕실 25도로 설정해줘" / "욕실 온도 28도" / "목욕탕 22.5도"
   4-5. Bathroom temperature query keywords (숫자 없이 온도 물어보는 경우):
      - 욕실 / 목욕탕 + 온도 몇 도 / 몇 도야 / 온도 알려줘 / 온도 확인  → cmd: "query_bathroom_temp"
      - 예: "욕실 온도 몇 도야?" / "욕실 지금 몇 도?" / "목욕탕 온도 알려줘"
+  4-6. Bathroom heating keywords (HIGHEST PRIORITY — always room: "bathroom", never ask clarification):
+     - 난방 켜 / 남방 켜 / 냄방 켜 / 난빵 켜 / 보일러 켜 / 욕실 따뜻하게 / 욕실 난방  → cmd: "heating", state: "on"
+     - 난방 꺼 / 남방 꺼 / 냄방 꺼 / 보일러 꺼 / 난방 끄 / 난방 정지                  → cmd: "heating", state: "off"
+     - 이 집에는 욕실 난방만 있으므로 "어디 난방?"을 절대 되묻지 말고 즉시 bathroom으로 처리한다.
+     - 예: "난방 켜줘" / "보일러 틀어" / "남방 켜" / "난방 꺼줘" / "보일러 꺼"
   5. If the command is completely unknown: {"cmd": "unknown", "msg": "<reason in Korean>", "tts_response": "<friendly Korean apology>"}
   6. Always include "tts_response" field with a short, natural Korean spoken response.
   7. Status query keywords → use cmd: "status":
+  8. LED "켜" with NO room specified (e.g. "불 켜", "불 켜줘", "조명 켜줘" without any room name):
+     → {"cmd": null, "tts_response": "어떤 방의 불을 켜드릴까요? 거실, 침실, 욕실, 차고, 현관 중 말씀해주세요."}
+     Do NOT guess a room. Always ask for clarification.
+     ※ 예외: "난방", "남방", "냄방", "보일러" 단어가 포함되면 Rule 4-6을 우선 적용한다 (Rule 8 적용 금지).
+  9. Music MUST only play when the user explicitly mentions music (음악, 노래, 재생, 틀어 etc.).
+     "불 켜", "전체 켜", "all_on" must NEVER trigger music playback.
      - "<공간> 상태 알려줘 / 확인해줘 / 어때?" → room: "<room>", target: "all"
      - "<공간> 불 켜져있어? / 전등 상태?"      → room: "<room>", target: "led"
      - "<공간> 문 열려있어? / 서보 상태?"       → room: "<room>", target: "servo"
@@ -165,7 +180,8 @@ Examples:
   "욕실 세그먼트 꺼줘"         → {"cmd":"seg7","device_id":"esp32_home","pin_clk":22,"pin_dio":23,"mode":"off","tts_response":"욕실 디스플레이를 껐어요."}
   "전체 불 꺼줘"               → {"cmd":"led","device_id":"all","state":"off","tts_response":"전체 전등을 껐어요."}
   "전체 꺼줘 / 모두 꺼줘 / 다 꺼줘"   → {"cmd":"all_off","device_id":"all","tts_response":"전체 전등과 음악을 껐어요."}
-  "전체 켜줘 / 모두 켜줘 / 다 켜줘"   → {"cmd":"all_on","device_id":"all","tts_response":"전체 전등과 음악을 켰어요."}
+  "전체 켜줘 / 모두 켜줘 / 다 켜줘 / 불 다 켜"   → {"cmd":"all_on","device_id":"all","tts_response":"전체 전등을 켰어요."}
+  "불 켜줘 / 불 켜 (방 없음)"         → {"cmd":null,"tts_response":"어떤 방의 불을 켜드릴까요? 거실, 침실, 욕실, 차고, 현관 중 말씀해주세요."}
   "거실 음악 틀어줘"           → {"cmd":"music","action":"play","tts_response":"음악을 재생할게요."}
   "음악 꺼줘"                  → {"cmd":"music","action":"pause","tts_response":"음악을 정지할게요."}
   "다음 곡"                    → {"cmd":"music","action":"next","tts_response":"다음 곡으로 넘길게요."}
@@ -178,9 +194,14 @@ Examples:
   "귀가했어 / 집에 왔어"        → {"cmd":"home_mode","device_id":"esp32_home","tts_response":"어서 오세요! 재실 감지 모드로 전환했어요."}
   "잘게 / 취침할게"             → {"cmd":"sleep_mode","device_id":"esp32_home","tts_response":"잘 자요! 거실 방범 모드를 켰어요."}
   "일어났어 / 기상"             → {"cmd":"wake_mode","device_id":"esp32_home","tts_response":"좋은 아침이에요! 재실 감지 모드로 전환했어요."}
+  "보안 모드 외출해"            → {"cmd":"away_mode","device_id":"esp32_home","tts_response":"외출 모드로 설정했어요."}
+  "방범 모드 켜줘"              → {"cmd":"away_mode","device_id":"esp32_home","tts_response":"방범 모드를 켰어요."}
+  "방해금지 모드"               → {"cmd":"dnd_mode","device_id":"esp32_home","tts_response":"방해금지 모드로 설정했어요. 알람이 무시됩니다."}
   "욕실 온도 몇 도야?"            → {"cmd":"query_bathroom_temp","device_id":"esp32_home","tts_response":"현재 온도 센서가 없어요. 설정된 희망 온도를 알려드릴게요."}
-  "욕실 25도로 설정해줘"          → {"cmd":"set_bathroom_temp","device_id":"esp32_home","value":25.0,"tts_response":"욕실 온도를 25도로 설정했어요."}
-  "욕실 온도 28.5도"              → {"cmd":"set_bathroom_temp","device_id":"esp32_home","value":28.5,"tts_response":"욕실 온도를 28.5도로 설정했어요."}
+  "욕실 25도로 설정해줘"          → {"cmd":"set_bathroom_temp","device_id":"esp32_home","value":25.0,"tts_response":"욕실 난방을 켜고 희망온도를 25도로 설정했어요."}
+  "욕실 온도 28.5도"              → {"cmd":"set_bathroom_temp","device_id":"esp32_home","value":28.5,"tts_response":"욕실 난방을 켜고 희망온도를 28.5도로 설정했어요."}
+  "난방 켜줘 / 보일러 틀어"       → {"cmd":"heating","device_id":"esp32_home","room":"bathroom","state":"on","tts_response":"욕실 난방을 켰어요."}
+  "난방 꺼줘 / 보일러 꺼"         → {"cmd":"heating","device_id":"esp32_home","room":"bathroom","state":"off","tts_response":"욕실 난방을 껐어요."}
   "오늘 날씨 어때"              → {"cmd":null,"tts_response":"날씨는 날씨 앱에서 확인해보세요!"}
 """
 
@@ -277,7 +298,7 @@ class LLMEngine:
             return cmd
 
         # PIR 모드 명령 처리 (validate 우회)
-        if cmd.get("cmd") in ("away_mode", "home_mode", "sleep_mode", "wake_mode"):
+        if cmd.get("cmd") in ("away_mode", "home_mode", "sleep_mode", "wake_mode", "dnd_mode"):
             logger.info(f"[LLM] PIR 모드 명령: {cmd}")
             return cmd
 
@@ -299,6 +320,16 @@ class LLMEngine:
         # 욕실 현재온도 조회 명령 처리 (validate 우회)
         if cmd.get("cmd") == "query_bathroom_temp":
             logger.info(f"[LLM] 욕실 온도 조회 명령: {cmd}")
+            return cmd
+
+        # 욕실 난방 ON/OFF 명령 처리 (validate 우회)
+        if cmd.get("cmd") == "heating":
+            state = cmd.get("state", "").lower()
+            if state not in ("on", "off"):
+                logger.warning(f"[LLM] heating 잘못된 state: {state}")
+                return None
+            cmd["room"] = cmd.get("room", "bathroom")
+            logger.info(f"[LLM] 욕실 난방 명령: state={state}")
             return cmd
 
         # 전체 디바이스 명령 처리

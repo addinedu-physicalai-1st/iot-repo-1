@@ -96,6 +96,7 @@ WS_TYPE_MANUAL_CMD    = "manual_cmd"      # 브라우저 수동 명령
 WS_TYPE_LLM_CMD       = "llm_cmd"         # LLM 파싱 결과
 WS_TYPE_MANUAL_TRIGGER = "manual_trigger" # 버튼 모드: 서버 STT 활성화 요청
 WS_TYPE_MUSIC_STATE   = "music_state"     # 브라우저 ytPlayer 상태 보고 (v1.6)
+WS_TYPE_AUDIO_CHUNK   = "audio_chunk"     # 브라우저 마이크 오디오 스트림 (wake_source=browser)
 
 
 class CommandRouter:
@@ -164,6 +165,11 @@ class CommandRouter:
         # 브라우저 ytPlayer 상태 보고 → UnifiedStateManager 반영 (v1.6)
         elif msg_type == WS_TYPE_MUSIC_STATE:
             return await self._handle_music_state(data)
+
+        # 브라우저 마이크 오디오 스트림 (wake_source=browser 시 Porcupine/VAD용)
+        elif msg_type == WS_TYPE_AUDIO_CHUNK:
+            await self._handle_audio_chunk(data)
+            return None  # 브로드캐스트 불필요
 
         else:
             logger.warning(f"[Router] 알 수 없는 WS type: {msg_type}")
@@ -366,10 +372,6 @@ class CommandRouter:
                     pin = ROOM_LED_PIN.get(room)
                     if pin is not None:
                         client.state[f"led_{pin}"] = 1
-            import asyncio
-            await asyncio.sleep(0.4)
-            await self._handle_music({"cmd": "music", "action": "play"})
-            logger.info("[Router] all_on: 음악 play 전송")
 
         else:
             return ws_cmd_result("fail", f"all 브로드캐스트: 지원하지 않는 cmd={cmd}")
@@ -605,6 +607,16 @@ class CommandRouter:
 
         logger.info(f"[Router] SEG7 전송 완료: {value:.1f}°C")
 
+        # 희망온도 설정 시 난방 자동 ON → 웹앱에 heating_state 브로드캐스트
+        heating_payload = _j.dumps({
+            "type":  "heating_state",
+            "room":  "bathroom",
+            "state": "on",
+        }, ensure_ascii=False)
+        if self._tcp.ws_broadcast:
+            await self._tcp.ws_broadcast(heating_payload)
+        logger.info("[Router] 온도 설정 → 난방 자동 ON 브로드캐스트")
+
         # 웹앱 동기화용 브로드캐스트 (ESP32 연결 여부 무관)
         ws_payload = _j.dumps({
             "type": "bathroom_temp_set",
@@ -614,14 +626,14 @@ class CommandRouter:
         if self._tcp.ws_broadcast:
             await self._tcp.ws_broadcast(ws_payload)
 
-        msg = f"욕실 희망온도 {value}°C 설정 완료"
+        msg = f"욕실 난방 ON + 희망온도 {value}°C 설정 완료"
         logger.info(f"[Router] {msg}")
 
         # DB 로그 (SR-3.1)
         if self._db:
             self._db.log("bathroom_temp", "command_router", msg,
                          device_id=DEVICE_HOME1, room="bathroom",
-                         detail={"action": "set", "value": value})
+                         detail={"action": "set_and_heat_on", "value": value})
 
         if tts:
             return _j.dumps({
@@ -930,19 +942,38 @@ class CommandRouter:
         WS manual_trigger 처리 - STTEngine.activate() 호출
         버튼 클릭 시 WS 경로로 즉시 LISTENING 전환
         """
-        import sys
-        for mod in sys.modules.values():
-            app = getattr(mod, 'app', None)
-            if app and hasattr(getattr(app, 'state', None), 'stt_engine'):
-                stt = app.state.stt_engine
-                if stt is None:
-                    return ws_cmd_result("warn", "STTEngine 비활성화")
-                if stt.state != "IDLE":
-                    return ws_cmd_result("ok", f"STT 이미 활성화: {stt.state}")
-                stt.activate()
-                logger.info("[Router] WS 버튼 트리거 → STT LISTENING 활성화")
-                return ws_cmd_result("ok", "STT LISTENING 활성화")
-        return ws_cmd_result("warn", "STTEngine 찾을 수 없음")
+        try:
+            from server.main import app
+            stt = getattr(app.state, 'stt_engine', None)
+        except Exception:
+            stt = None
+        if stt is None:
+            return ws_cmd_result("warn", "STTEngine 비활성화")
+        if stt.state != "IDLE":
+            return ws_cmd_result("ok", f"STT 이미 활성화: {stt.state}")
+        stt.activate()
+        logger.info("[Router] WS 버튼 트리거 → STT LISTENING 활성화")
+        return ws_cmd_result("ok", "STT LISTENING 활성화")
+
+    async def _handle_audio_chunk(self, data: dict) -> None:
+        """
+        브라우저 오디오 청크 → STTEngine.feed_audio (wake_source=browser 시)
+        """
+        import base64
+        raw = data.get("data", "")
+        if not raw:
+            return
+        try:
+            chunk = base64.b64decode(raw)
+        except Exception:
+            return
+        try:
+            from server.main import app
+            stt = getattr(app.state, 'stt_engine', None)
+            if stt and getattr(stt, 'wake_source', 'server') == "browser":
+                stt.feed_audio(chunk)
+        except Exception:
+            pass
 
     async def _handle_voice(self, text: str) -> str:
         """
@@ -952,16 +983,24 @@ class CommandRouter:
           - LLM이 {"cmd": None, "tts_response": "..."} 반환 시
             execute() 우회 → tts_response만 담아 반환
         """
+        # STT 오인식 교정 (LLM/fallback 공통 적용)
+        normalized = self._normalize_stt(text)
+        if normalized != text:
+            logger.info(f"[Router] STT 정규화: '{text}' → '{normalized}'")
+        text = normalized
+
         if self._llm is None:
-            # LLM 없을 때 키워드 기반 간단 파싱 (fallback)
-            logger.info(f"[Router] LLM 없음, 키워드 fallback: {text}")
-            data = self._simple_parse(text)
-        else:
-            logger.info(f"[Router] LLM 파싱 요청: {text}")
-            data = await self._llm.parse(text)
+            logger.warning(f"[Router] LLM 비활성화 — Ollama 실행 필요: '{text}'")
+            return ws_cmd_result("warn", "Ollama가 실행되지 않았습니다. ollama serve 후 다시 시도해 주세요.")
+
+        logger.info(f"[Router] LLM 파싱 요청: {text}")
+        data = await self._llm.parse(text)
 
         if not data:
+            logger.warning(f"[Router] 명령 파싱 실패: '{text}'")
             return ws_cmd_result("unknown", f"명령을 이해하지 못했습니다: '{text}'")
+
+        logger.info(f"[Router] 음성 명령 파싱: '{text}' → cmd={data.get('cmd')} action={data.get('action')}")
 
         # DB 로그: LLM 파싱 결과 (SR-3.1)
         if self._db:
@@ -980,9 +1019,33 @@ class CommandRouter:
                 "status": "conversation",
                 "msg": "자유 대화 응답",
                 "tts_response": tts,
+                "original_text": text,
+                "display_text": text,  # 자유 대화는 원문 그대로
             }, ensure_ascii=False)
 
-        return await self.execute(data)
+        result = await self.execute(data)
+        return self._wrap_voice_result(result, text, data)
+
+    def _wrap_voice_result(self, result: str, original_text: str, parsed_data: dict) -> str:
+        """
+        voice_text 처리 결과에 original_text, display_text 추가.
+        - 성공 시: display_text = LLM 해석 결과 (오인식 교정)
+        - 실패/unknown 시: display_text 없음 → 프론트는 original_text 사용
+        """
+        try:
+            obj = _json.loads(result)
+        except Exception:
+            return result
+        if obj.get("type") != "cmd_result":
+            return result
+        obj["original_text"] = original_text
+        status = obj.get("status", "")
+        if status == "ok":
+            display = self._cmd_to_display_text(parsed_data)
+            if display:
+                obj["display_text"] = display
+        # fail/unknown/warn: display_text 없음 → 프론트는 original_text 그대로 표시
+        return _json.dumps(obj, ensure_ascii=False)
 
     def _resolve_device(self, data: dict) -> Optional[str]:
         """
@@ -1062,12 +1125,111 @@ class CommandRouter:
 
         return None
 
-    def _simple_parse(self, text: str) -> Optional[dict]:
+    def _normalize_stt(self, text: str) -> str:
         """
-        LLM 없을 때 키워드 기반 단순 파싱 (fallback)
+        Whisper STT 한국어 오인식 교정
+        - 음성과 발음이 유사하지만 다르게 인식되는 단어를 올바른 형태로 치환
+        - LLM/fallback 파싱 전에 공통 적용
+        """
+        import re as _re
+
+        # ── 난방 관련 오인식 ──────────────────────────────────────────
+        # 남방/냄방/난빵/냄빵/남빵/란방/남바/남빵 → 난방
+        text = _re.sub(r'[남냄난란][방빵바]', '난방', text)
+
+        # ── 보일러 오인식 ─────────────────────────────────────────────
+        # 뵈일러/보이러/보일로/뵈일로 → 보일러
+        text = _re.sub(r'뵈일[러로]', '보일러', text)
+        text = _re.sub(r'보이[러를르]', '보일러', text)
+        text = _re.sub(r'보일[로루]', '보일러', text)
+
+        # ── 켜줘/켜 오인식 ───────────────────────────────────────────
+        # 켜줘요/케줘/켜주 → 켜줘
+        text = text.replace('켜줘요', '켜줘')
+        text = text.replace('케줘', '켜줘')
+        text = text.replace('켜주세요', '켜줘')
+        text = text.replace('꺼주세요', '꺼줘')
+        text = text.replace('꺼줘요', '꺼줘')
+
+        # ── 커튼 오인식 ──────────────────────────────────────────────
+        # 거튼/꺼튼/컨튼 → 커튼
+        text = _re.sub(r'[거꺼컨][튼튼]', '커튼', text)
+
+        # ── 침실 오인식 ──────────────────────────────────────────────
+        text = text.replace('침실', '침실')  # placeholder for future
+        text = text.replace('칩실', '침실')
+        text = text.replace('침씰', '침실')
+
+        # ── 욕실 오인식 ──────────────────────────────────────────────
+        text = text.replace('욕씰', '욕실')
+        text = text.replace('옥실', '욕실')
+
+        # ── 거실 오인식 ──────────────────────────────────────────────
+        text = text.replace('거씰', '거실')
+        text = text.replace('걱실', '거실')
+
+        # ── 현관 오인식 ──────────────────────────────────────────────
+        text = text.replace('현간', '현관')
+        text = text.replace('현완', '현관')
+
+        return text
+
+    def _cmd_to_display_text(self, data: dict) -> str:
+        """
+        실행된 명령을 사람이 읽기 쉬운 음성 명령 형태로 변환.
+        voice command 디스플레이용 (STT 오인식 시 LLM 해석 결과 표시)
+        """
+        cmd = data.get("cmd", "")
+        room = data.get("room", "")
+        room_label = ROOM_LABEL.get(room, room) if room else ""
+
+        if cmd == "set_bathroom_temp":
+            val = data.get("value")
+            if val is not None:
+                return f"욕실 난방 {float(val):.0f}도로 설정해줘"
+            return "욕실 난방 온도 설정해줘"
+        if cmd == "heating":
+            s = data.get("state", "off").lower()
+            return f"욕실 난방 {'켜줘' if s == 'on' else '꺼줘'}"
+        if cmd == CMD_LED:
+            state = data.get("state", "on").lower()
+            on_off = "켜줘" if state == "on" else "꺼줘"
+            if room_label:
+                return f"{room_label} 불 {on_off}"
+            return f"불 {on_off}"
+        if cmd == CMD_SERVO:
+            angle = data.get("angle", 0)
+            open_close = "열어줘" if angle >= 45 else "닫아줘"
+            if room == "bedroom":
+                return f"침실 커튼 {open_close}"
+            if room_label:
+                return f"{room_label} 문 {open_close}"
+            return f"커튼 {open_close}"
+        if cmd == "music":
+            action = data.get("action", "play").lower()
+            labels = {"play": "음악 켜줘", "pause": "음악 일시정지", "stop": "음악 꺼줘", "next": "다음 곡", "prev": "이전 곡"}
+            return labels.get(action, "음악 켜줘")
+        if cmd == "all_on":
+            return "전체 켜줘"
+        if cmd == "all_off":
+            return "전체 꺼줘"
+        if cmd and (cmd.startswith("pir_") or cmd.endswith("_mode")):
+            mode = cmd.replace("pir_", "").replace("_mode", "")
+            labels = {"away": "외출", "home": "귀가", "sleep": "취침", "wake": "기상", "dnd": "방해금지"}
+            return f"{labels.get(mode, mode)} 모드"
+        return ""
+
+    # ── _simple_parse 비활성화: STT 결과는 무조건 LLM 파싱 ─────────────────
+    def _simple_parse(self, text: str) -> Optional[dict]:
+        """[비활성화] STT 결과는 무조건 LLM으로 파싱"""
+        return None
+
+    def _simple_parse_disabled(self, text: str) -> Optional[dict]:
+        """
+        [비활성화] LLM 없을 때 키워드 기반 단순 파싱 (fallback)
         v2: device_id → esp32_home, room 필드 추가
         """
-        text = text.strip()
+        text = self._normalize_stt(text.strip())
 
         # room 결정
         room = None
@@ -1101,11 +1263,32 @@ class CommandRouter:
             r = room if (room and not is_all) else "all"
             return {"cmd": "status", "room": r, "target": target}
 
+        # ── 욕실 난방 (LED/전원 키워드보다 먼저 체크) ────────────────────
+        if any(k in text for k in ["난방 켜", "난방 틀어", "난방 시작", "보일러 켜", "보일러 틀어", "욕실 따뜻"]):
+            return {"cmd": "heating", "room": "bathroom", "state": "on",
+                    "tts_response": "욕실 난방을 켰어요."}
+        if any(k in text for k in ["난방 꺼", "난방 끄", "난방 정지", "보일러 꺼", "보일러 끄"]):
+            return {"cmd": "heating", "room": "bathroom", "state": "off",
+                    "tts_response": "욕실 난방을 껐어요."}
+
+        # ── 음악 (LED "꺼"보다 먼저 체크) ─────────────────────────────────
+        if any(k in text for k in ["음악 틀어", "음악 틀어줘", "음악 틀어요", "음악 켜", "음악 재생", "음악 재생해", "노래 틀어", "노래 재생"]):
+            return {"cmd": "music", "action": "play"}
+        if any(k in text for k in ["음악 꺼", "음악 꺼줘", "음악 정지", "음악 멈춰", "노래 꺼"]):
+            return {"cmd": "music", "action": "pause"}
+        if any(k in text for k in ["다음 곡", "다음곡"]):
+            return {"cmd": "music", "action": "next"}
+        if any(k in text for k in ["이전 곡", "이전곡"]):
+            return {"cmd": "music", "action": "prev"}
+
         if any(k in text for k in ["켜", "켜줘", "불 켜", "조명 켜"]):
             if is_all:
                 return {"cmd": "all_on", "device_id": "all"}
             if not room:
-                return {"cmd": CMD_LED, "state": "on", "device_id": "all"}
+                return {
+                    "cmd": None,
+                    "tts_response": "어떤 방의 불을 켜드릴까요? 거실, 침실, 욕실, 차고, 현관 중 말씀해주세요.",
+                }
             return {**base, "cmd": CMD_LED, "state": "on"}
 
         is_power_off = any(k in text for k in ["꺼", "꺼줘", "전원 꺼", "다 꺼", "모두 꺼", "전체 꺼"])
@@ -1137,15 +1320,6 @@ class CommandRouter:
             return {**base, "cmd": CMD_SERVO, "angle": 90}
         if any(k in text for k in ["닫아", "닫아줘", "문 닫"]) and room:
             return {**base, "cmd": CMD_SERVO, "angle": 0}
-
-        if any(k in text for k in ["음악 틀어", "음악 켜", "음악 재생"]):
-            return {"cmd": "music", "action": "play"}
-        if any(k in text for k in ["음악 꺼", "음악 정지", "음악 멈춰"]):
-            return {"cmd": "music", "action": "pause"}
-        if any(k in text for k in ["다음 곡", "다음곡"]):
-            return {"cmd": "music", "action": "next"}
-        if any(k in text for k in ["이전 곡", "이전곡"]):
-            return {"cmd": "music", "action": "prev"}
 
         # ── PIR 모드 키워드 ───────────────────────────────────────────
         # PIR 명령은 _execute_pir_mode() 에서 pir_device(home2)로 직접 라우팅
