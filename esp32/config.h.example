@@ -11,14 +11,13 @@
 #define CONFIG_H
 
 // ── Wi-Fi ────────────────────────────────────
-#define WIFI_SSID      "addinedu_201class_2-2.4G"
-#define WIFI_PASSWORD  "201class2!"
+#define WIFI_SSID      "your_wifi_ssid"
+#define WIFI_PASSWORD  "your_wifi_password"
 
 // ── 서버 IP (Python 서버) ────────────────────
-#define SERVER_IP      "192.168.0.154"
+#define SERVER_IP      "192.168.0.xxx"
 
 // ── HMAC 서명 키 (서버 .env의 ESP32_SECRET 값과 동일) ──
-
-#define ESP32_SECRET   "568e4910e7476668026fb27692ff20d4"
+#define ESP32_SECRET   "your_esp32_secret_key"
 
 #endif // CONFIG_H

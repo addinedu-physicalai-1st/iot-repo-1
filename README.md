@@ -63,12 +63,14 @@ iot-repo-1/
 ├── web/
 │   └── index_dashboard.html         # 대시보드 (홈맵 + 센서 + 로그)
 ├── esp32/                           # ESP32 펌웨어 소스
-│   ├── config.h                     # WiFi/IP 설정 (Git 미포함)
-│   ├── esp32_cam.ino                # ESP32-CAM MJPEG 스트리밍
-│   ├── esp32_home1.ino              # 통합 컨트롤러 펌웨어
-│   ├── esp32_home1_hmac.ino         # HMAC 서명 검증 포함 버전
-│   ├── esp32_home2.ino
-│   └── esp32_home2_hmac.ino
+│   ├── config.h.example             # WiFi/IP/HMAC 설정 템플릿 (→ config.h로 복사)
+│   ├── config.h                     # WiFi/IP/HMAC 설정 (Git 미포함)
+│   ├── esp32_cam/                   # ESP32-CAM MJPEG 스트리밍
+│   │   └── esp32_cam.ino
+│   ├── esp32_home1_hmac/            # 홈 컨트롤러 #1 (침실서보/욕실seg7·DHT11)
+│   │   └── esp32_home1_hmac.ino
+│   └── esp32_home2_hmac/            # 홈 컨트롤러 #2 (LED5개/차고·현관서보/PIR)
+│       └── esp32_home2_hmac.ino
 ├── gui/
 │   └── dashboard.py                 # PyQt6 대시보드
 ├── config/
@@ -180,6 +182,9 @@ nano config.h
 | `WIFI_SSID` | WiFi 네트워크 이름 | `"MyWiFi"` |
 | `WIFI_PASSWORD` | WiFi 비밀번호 | `"MyPassword"` |
 | `SERVER_IP` | Python 서버 IP | `"192.168.0.100"` |
+| `ESP32_SECRET` | HMAC 서명 공유 키 (서버 `.env`와 동일) | `"my-secret-key"` |
+
+> `config.h`는 각 펌웨어 폴더(`esp32_cam/`, `esp32_home1_hmac/`, `esp32_home2_hmac/`)에 복사해야 합니다.
 
 ### 5. 파일 권한 초기화
 
@@ -295,8 +300,9 @@ Authorization: Bearer <token>
 
 | 디바이스 ID | 위치 | 기능 |
 |-------------|------|------|
-| `esp32_home` | 통합 컨트롤러 | LED, 서보, DHT22, 7세그먼트 |
-| `esp32_cam`  | 현관 카메라 | MJPEG UDP 스트리밍 (SmartGate) |
+| `esp32_home1` | 홈 컨트롤러 #1 | 침실 서보(커튼), 욕실 7세그먼트, DHT11 |
+| `esp32_home2` | 홈 컨트롤러 #2 | LED 5개, 차고·현관 서보, PIR 센서 |
+| `esp32_cam`   | 현관 카메라 | MJPEG UDP 스트리밍 (SmartGate) |
 
 ### TCP 포트
 

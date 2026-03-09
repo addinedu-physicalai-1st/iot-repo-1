@@ -436,7 +436,7 @@ class TCPServer:
             try:
                 cmd_dict = _json.loads(data.decode("utf-8").strip().rstrip(b"\n".decode()))
                 ts = str(int(_time.time()))
-                payload_bytes = _json.dumps(cmd_dict, ensure_ascii=False).encode()
+                payload_bytes = _json.dumps(cmd_dict, ensure_ascii=False, separators=(',', ':')).encode()
                 msg = ts.encode() + b"." + payload_bytes
                 sig = _hmac.new(_ESP32_SECRET, msg, hashlib.sha256).hexdigest()
                 signed = _json.dumps(

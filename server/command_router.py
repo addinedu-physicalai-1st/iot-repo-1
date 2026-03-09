@@ -102,21 +102,10 @@ except ImportError:
 
 def _sign_payload(payload: bytes) -> bytes:
     """
-    평문 payload bytes → HMAC 서명 패킷 bytes
-    esp32_secure 없거나 오류 시 원본 payload 그대로 반환 (하위 호환)
+    평문 payload bytes 그대로 반환.
+    HMAC 서명은 tcp_server.send_command()에서 일괄 처리.
     """
-    if not _HMAC_ENABLED:
-        return payload
-    try:
-        import json as _j
-        # payload는 JSON bytes (끝에 \n 포함 가능)
-        cmd_str = payload.decode().strip()
-        cmd_dict = _j.loads(cmd_str)
-        signed = _build_signed_packet(cmd_dict)
-        return (signed + "\n").encode()
-    except Exception as e:
-        logger.warning(f"[Security] HMAC 서명 실패 — 평문 전송: {e}")
-        return payload
+    return payload
 
 
 # ─────────────────────────────────────────────

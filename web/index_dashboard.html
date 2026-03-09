@@ -3944,7 +3944,7 @@ async function searchDbLogs(resetPage = true) {
   params.set('offset', dblogOffset);
 
   try {
-    const res = await fetch(`/logs/search?${params}`);
+    const res = await fetch(`/logs/search?${params}`,{headers:getAuthHeaders()});
     const data = await res.json();
     dblogTotal = data.total || 0;
     renderDbLogs(data.items || []);
@@ -4083,13 +4083,13 @@ async function loadPatternAnalysis() {
 
   try {
     const [daily, hourlyAll, hourlyWd, hourlyWe, cats, devs, anomalies] = await Promise.all([
-      fetch(`/logs/pattern/daily?${q()}`).then(r => r.json()),
-      fetch(`/logs/pattern/hourly?${q()}`).then(r => r.json()),
-      fetch(`/logs/pattern/hourly?${q({day_type:'weekday'})}`).then(r => r.json()),
-      fetch(`/logs/pattern/hourly?${q({day_type:'weekend'})}`).then(r => r.json()),
-      fetch(`/logs/pattern/categories?${q()}`).then(r => r.json()),
-      fetch(`/logs/pattern/devices?${q()}`).then(r => r.json()),
-      fetch(`/logs/pattern/anomalies?${q()}`).then(r => r.json()),
+      fetch(`/logs/pattern/daily?${q()}`,{headers:getAuthHeaders()}).then(r => r.json()),
+      fetch(`/logs/pattern/hourly?${q()}`,{headers:getAuthHeaders()}).then(r => r.json()),
+      fetch(`/logs/pattern/hourly?${q({day_type:'weekday'})}`,{headers:getAuthHeaders()}).then(r => r.json()),
+      fetch(`/logs/pattern/hourly?${q({day_type:'weekend'})}`,{headers:getAuthHeaders()}).then(r => r.json()),
+      fetch(`/logs/pattern/categories?${q()}`,{headers:getAuthHeaders()}).then(r => r.json()),
+      fetch(`/logs/pattern/devices?${q()}`,{headers:getAuthHeaders()}).then(r => r.json()),
+      fetch(`/logs/pattern/anomalies?${q()}`,{headers:getAuthHeaders()}).then(r => r.json()),
     ]);
 
     // 1) 일별 타임라인 (Line)
