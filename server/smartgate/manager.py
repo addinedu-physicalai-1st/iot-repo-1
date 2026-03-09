@@ -618,10 +618,24 @@ class SmartGateManager:
             logger.info("[SmartGate] 🔧 시뮬레이션 모드 | 현관 조명 ON (skip)")
             return
         try:
-            from protocol.schema import cmd_light
+            import json as _j
+            from server.esp32_secure import build_signed_packet as _build_signed_packet
+            from protocol.schema import cmd_led, ROOM_LED_PIN
+
             device_id = self._cfg.get("gate_device_id", "esp32_entrance")
-            command = cmd_light(pin=0, state=True, room="entrance")
-            result = await self._tcp_server.send_command(device_id, command)
+            pin = ROOM_LED_PIN.get("entrance", 0)
+            payload = cmd_led(pin, "on", "entrance")
+
+            # HMAC 서명 적용 (esp32_secure 없으면 평문 전송)
+            try:
+                cmd_str = payload.decode().strip()
+                cmd_dict = _j.loads(cmd_str)
+                signed = _build_signed_packet(cmd_dict)
+                payload = (signed + "\n").encode()
+            except Exception:
+                pass  # 서명 실패 시 평문 그대로
+
+            result = await self._tcp_server.send_command(device_id, payload)
             if result:
                 logger.info("[SmartGate] 💡 현관 조명 ON")
             else:

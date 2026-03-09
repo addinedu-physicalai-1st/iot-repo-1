@@ -124,6 +124,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── [DEBUG] command_router 진단용 DEBUG 레벨 활성화 ──────────────────
+# dnd_mode TTS 미억제 이슈(ISSUE_dnd모드_TTS알람미억제_20260307) 추적용
+# 원인 확인 후 아래 두 줄 제거
+logging.getLogger("server.command_router").setLevel(logging.DEBUG)
+logging.getLogger("server.camera_stream").setLevel(logging.DEBUG)
+
 
 # ─────────────────────────────────────────────
 # 설정 로드
@@ -161,6 +167,14 @@ def load_settings() -> dict:
         cfg.setdefault("ollama", {})["host"] = os.environ["OLLAMA_HOST"]
     if os.getenv("LLM_MODEL"):
         cfg.setdefault("ollama", {})["model"] = os.environ["LLM_MODEL"]
+
+    # ── SmartGate 제스처 시퀀스 (.env SMARTGATE_SEQUENCE="1,0,3") ──
+    if os.getenv("SMARTGATE_SEQUENCE"):
+        try:
+            seq = [int(x.strip()) for x in os.environ["SMARTGATE_SEQUENCE"].split(",")]
+            cfg.setdefault("smartgate", {}).setdefault("gesture_auth", {})["sequence"] = seq
+        except ValueError:
+            logger.warning("[Config] SMARTGATE_SEQUENCE 파싱 실패 — settings.yaml 값 사용")
 
     return cfg
 
@@ -405,6 +419,10 @@ def create_app() -> FastAPI:
             cam_mod.UDP_PORT       = _udp_port
             cam_mod.ANALYZE_EVERY  = _analyze_n
 
+            # ── v1.0: UDP IP 화이트리스트 주입 (MEDIUM-5) ──────────────
+            _allowed_ips = cam_mod.load_allowed_cam_ips(_cam_cfg)
+            cam_mod.set_allowed_cam_ips(_allowed_ips)
+
             # UDP 수신 스레드 시작
             cam_mod.start(multipart=_multipart)
             logger.info(
@@ -429,6 +447,22 @@ def create_app() -> FastAPI:
                 if tts_engine:
                     await tts_engine.speak(text)
 
+            # ── v1.0: 보안모드 콜백을 analysis_loop 시작 전에 등록 ──────
+            # 수정 이유: 기존 코드는 SmartGate 이후에 콜백 등록 → analysis_loop가
+            # 콜백 없이 먼저 시작되는 순서 버그. analysis_loop 직전으로 이동.
+            def _get_security_mode() -> str:
+                """현재 PIR 보안모드 반환 (camera_stream 콜백용)"""
+                pir = command_router._current_pir_mode
+                # "dnd_mode" → "dnd", "away_mode" → "away", None → "off"
+                if pir is None:
+                    return "off"
+                mode = pir.replace("_mode", "")
+                logger.debug(f"[SecurityMode] _get_security_mode() → {mode} (raw={pir})")
+                return mode
+
+            cam_mod.set_security_mode_fn(_get_security_mode)
+            logger.info("[CAM] 보안모드 콜백 연동 완료 (command_router → camera_stream)")
+
             # 분석 루프 asyncio task
             analysis_task = asyncio.create_task(
                 cam_mod.analysis_loop(
@@ -450,23 +484,6 @@ def create_app() -> FastAPI:
             if frame_analyzer is not None:
                 frame_analyzer.set_face_auth(smartgate_manager.face_auth)
                 logger.info("[CAM] frame_analyzer ← SmartGate face_auth 연동 완료")
-
-        # ── v1.0: 보안모드 → camera_stream 연동 ──────────────────────
-        # command_router._current_pir_mode ("dnd_mode" 등)를 camera_stream에 전달
-        # → 방해 금지 모드 시 intruder 알람 억제
-        if not disable_cam:
-            import server.camera_stream as _cam_ref2
-
-            def _get_security_mode() -> str:
-                """현재 PIR 보안모드 반환 (camera_stream 콜백용)"""
-                pir = command_router._current_pir_mode
-                # "dnd_mode" → "dnd", "away_mode" → "away", None → "off"
-                if pir is None:
-                    return "off"
-                return pir.replace("_mode", "")
-
-            _cam_ref2.set_security_mode_fn(_get_security_mode)
-            logger.info("[CAM] 보안모드 콜백 연동 완료 (command_router → camera_stream)")
 
         logger.info("=" * 50)
         logger.info("서버 준비 완료 - 요청 대기 중")

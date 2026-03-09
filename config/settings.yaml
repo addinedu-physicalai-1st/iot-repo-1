@@ -169,6 +169,12 @@ camera:
   udp_port: 5005          # ESP32-CAM이 보내는 UDP 포트 (esp32_cam.ino SERVER_PORT와 동일)
   multipart: true         # 항상 멀티파트 모드 사용 (MAGIC 헤더 + 조각 전송)
   analyze_every: 10       # 매 N 프레임마다 분석 (키우면 CPU·지연↓, 예: 20)
+  # v2.2: UDP IP 화이트리스트 (MEDIUM-5 보안 조치)
+  # 비인가 IP 패킷 차단 — ESP32-CAM IP 변경 시 이 목록만 수정 후 서버 재시작
+  # 복수 카메라 추가 시 아래 주석 해제
+  allowed_ips:
+    - "192.168.0.19"      # ESP32-CAM #1 (현관)
+    # - "192.168.0.xx"    # ESP32-CAM #2 (추가 시 주석 해제)
   # 하이브리드 재전송: frame_id 손실률 기반 적응형 품질 (camera_stream.py 상수)
   # loss_threshold: 0.15 → quality_down, loss_recovery: 0.05 → quality_up
 
@@ -203,8 +209,8 @@ database:
   enabled: true             # false 시 DB 로깅 비활성화 (기존 동작 유지)
   host: "localhost"
   port: 3306
-  user: "iot_user"
-  password: "1111"
+  user: ""              # .env DB_USER 로 주입 (settings.yaml에 평문 기재 금지)
+  password: ""          # .env DB_PASSWORD 로 주입 (settings.yaml에 평문 기재 금지)
   db: "iot_smart_home"
   pool_size: 5              # aiomysql 커넥션 풀 크기
   pool_recycle: 3600        # 커넥션 재활용 주기 (초)
@@ -260,7 +266,7 @@ smartgate:
 
   gesture_auth:
     mode: "number"
-    sequence: [1, 0, 3]
+    sequence: []         # .env SMARTGATE_SEQUENCE 로 주입 (예: "1,0,3")
     timeout_sec: 7.0
     hold_frames: 8
     cooldown_sec: 1.5
