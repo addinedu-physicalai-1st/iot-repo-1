@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import json as _json
 import logging
+from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from protocol.schema import (
@@ -85,6 +86,37 @@ if TYPE_CHECKING:
     from server.tcp_server import TCPServer
 
 logger = logging.getLogger(__name__)
+
+# ── PIR 모드 상태 영속화 파일 ─────────────────────────────────────────
+_PIR_STATE_FILE = Path("data/pir_mode.json")
+
+# ── HMAC 서명 헬퍼 (esp32_secure 선택적 로드) ────────────────────────
+try:
+    from server.esp32_secure import build_signed_packet as _build_signed_packet
+    _HMAC_ENABLED = True
+    logger.info("[Security] TCP HMAC 서명 활성화")
+except ImportError:
+    _HMAC_ENABLED = False
+    logger.warning("[Security] esp32_secure 모듈 없음 — 평문 TCP 전송")
+
+
+def _sign_payload(payload: bytes) -> bytes:
+    """
+    평문 payload bytes → HMAC 서명 패킷 bytes
+    esp32_secure 없거나 오류 시 원본 payload 그대로 반환 (하위 호환)
+    """
+    if not _HMAC_ENABLED:
+        return payload
+    try:
+        import json as _j
+        # payload는 JSON bytes (끝에 \n 포함 가능)
+        cmd_str = payload.decode().strip()
+        cmd_dict = _j.loads(cmd_str)
+        signed = _build_signed_packet(cmd_dict)
+        return (signed + "\n").encode()
+    except Exception as e:
+        logger.warning(f"[Security] HMAC 서명 실패 — 평문 전송: {e}")
+        return payload
 
 
 # ─────────────────────────────────────────────
@@ -129,11 +161,31 @@ class CommandRouter:
             settings.get("command_keywords", {})
         )
 
-        # 현재 PIR 모드 상태 (페이지 재로드 시 동기화용)
+        # 현재 PIR 모드 상태 — 서버 재시작 후에도 마지막 상태 복원
         # None | "away_mode" | "home_mode" | "sleep_mode" | "wake_mode" | "dnd_mode"
-        self._current_pir_mode: Optional[str] = None
+        self._current_pir_mode: Optional[str] = self._load_pir_mode()
 
-    # ── 공개 API ────────────────────────────────────────────────────
+    # ── PIR 모드 영속화 ─────────────────────────────────────────────
+    def _load_pir_mode(self) -> Optional[str]:
+        """서버 시작 시 마지막 PIR 모드 복원"""
+        try:
+            if _PIR_STATE_FILE.exists():
+                data = _json.loads(_PIR_STATE_FILE.read_text())
+                mode = data.get("pir_mode")
+                if mode:
+                    logger.info(f"[Router] PIR 모드 복원: {mode}")
+                return mode
+        except Exception as e:
+            logger.warning(f"[Router] PIR 모드 복원 실패: {e}")
+        return None
+
+    def _save_pir_mode(self, mode: Optional[str]) -> None:
+        """PIR 모드 변경 시 파일 저장"""
+        try:
+            _PIR_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _PIR_STATE_FILE.write_text(_json.dumps({"pir_mode": mode}))
+        except Exception as e:
+            logger.warning(f"[Router] PIR 모드 저장 실패: {e}")
 
     async def handle(self, client_id: str, data: dict) -> str:
         """
@@ -142,6 +194,7 @@ class CommandRouter:
         Returns: ws_cmd_result JSON 문자열
         """
         msg_type = data.get("type")
+        logger.debug(f"[Router] handle() 진입 — client={client_id} type={msg_type} data={data}")
 
         # 음성 텍스트 → LLM 파싱 후 실행
         if msg_type == WS_TYPE_VOICE_TEXT:
@@ -156,7 +209,10 @@ class CommandRouter:
 
         # LLM 파싱 결과 직접 실행
         elif msg_type == WS_TYPE_LLM_CMD:
-            return await self.execute(data)
+            logger.debug(f"[Router] llm_cmd 수신 → execute() 호출 — cmd={data.get('cmd')}")
+            result = await self.execute(data)
+            logger.debug(f"[Router] execute() 완료 — result={result}")
+            return result
 
         # 버튼 모드: 서버 STTEngine LISTENING 활성화
         elif msg_type == WS_TYPE_MANUAL_TRIGGER:
@@ -195,6 +251,7 @@ class CommandRouter:
 
         # cmd="away_mode"/"home_mode"/"sleep_mode"/"wake_mode" → PIR 모드 제어
         if data.get("cmd") in ("away_mode", "home_mode", "sleep_mode", "wake_mode", "dnd_mode"):
+            logger.debug(f"[Router] execute() → _execute_pir_mode() 진입 — cmd={data.get('cmd')}")
             return await self._execute_pir_mode(data)
 
         # cmd="pir_dismiss" → PIR 침입 알림 해제 (LED 처리)
@@ -241,7 +298,7 @@ class CommandRouter:
             return ws_cmd_result("fail", f"알 수 없는 cmd: {data.get('cmd')}")
 
         # 6. TCP 전송
-        success = await self._tcp.send_command(device_id, payload)
+        success = await self._tcp.send_command(device_id, _sign_payload(payload))
         if success:
             logger.info(f"[Router] 전송 성공: {device_id} ← {data}")
             cmd    = data.get("cmd")
@@ -331,7 +388,7 @@ class CommandRouter:
         if cmd == CMD_LED:
             for room in ALL_ROOMS:
                 payload = self._build_payload({"cmd": CMD_LED, "room": room, "state": state})
-                if payload and await self._tcp.send_command(led_device_id, payload):
+                if payload and await self._tcp.send_command(led_device_id, _sign_payload(payload)):
                     ok_cnt += 1
                     pin = ROOM_LED_PIN.get(room)
                     if pin is not None:
@@ -345,7 +402,7 @@ class CommandRouter:
                 if not self._tcp.get_device(target):
                     target = DEVICE_HOME  # 하위 호환
                 payload = self._build_payload({"cmd": CMD_SERVO, "room": room, "angle": angle})
-                if payload and await self._tcp.send_command(target, payload):
+                if payload and await self._tcp.send_command(target, _sign_payload(payload)):
                     ok_cnt += 1
                     t_client = self._tcp.get_device(target)
                     if t_client:
@@ -354,7 +411,7 @@ class CommandRouter:
         elif cmd == "all_off":
             for room in ALL_ROOMS:
                 payload = self._build_payload({"cmd": CMD_LED, "room": room, "state": "off"})
-                if payload and await self._tcp.send_command(led_device_id, payload):
+                if payload and await self._tcp.send_command(led_device_id, _sign_payload(payload)):
                     ok_cnt += 1
                     pin = ROOM_LED_PIN.get(room)
                     if pin is not None:
@@ -367,7 +424,7 @@ class CommandRouter:
         elif cmd == "all_on":
             for room in ALL_ROOMS:
                 payload = self._build_payload({"cmd": CMD_LED, "room": room, "state": "on"})
-                if payload and await self._tcp.send_command(led_device_id, payload):
+                if payload and await self._tcp.send_command(led_device_id, _sign_payload(payload)):
                     ok_cnt += 1
                     pin = ROOM_LED_PIN.get(room)
                     if pin is not None:
@@ -403,12 +460,6 @@ class CommandRouter:
         cmd = data.get("cmd")
         tts = data.get("tts_response", "")
 
-        # PIR 모드 명령: LED 제어 포함 → esp32_home2 (LED 보유)
-        pir_device = DEVICE_HOME2 if self._tcp.get_device(DEVICE_HOME2) else DEVICE_HOME
-        client = self._tcp.get_device(pir_device)
-        if not client:
-            return ws_cmd_result("fail", "esp32_home2 미연결")
-
         # cmd → PIR 모드 + context 매핑
         pir_map = {
             "away_mode":  ("guard",    "away"),
@@ -419,17 +470,31 @@ class CommandRouter:
         }
         pir_mode, context = pir_map[cmd]
 
-        # 현재 PIR 모드 저장 (페이지 재로드 동기화용)
+        # ── 모드 상태 세팅: ESP32 연결 여부와 무관하게 항상 먼저 저장 ──
+        # (ESP32 미연결 시에도 camera_stream dnd 억제가 동작해야 하므로)
         self._current_pir_mode = cmd
+        self._save_pir_mode(cmd)
+        logger.debug(f"[Router] _current_pir_mode 설정 완료: {self._current_pir_mode}")
+
+        # PIR 모드 명령: LED 제어 포함 → esp32_home2 (LED 보유)
+        pir_device = DEVICE_HOME2 if self._tcp.get_device(DEVICE_HOME2) else DEVICE_HOME
+        client = self._tcp.get_device(pir_device)
+        if not client:
+            # ESP32 미연결이어도 모드는 세팅됐으므로 camera_stream 억제는 동작함
+            logger.warning(f"[Router] esp32_home2 미연결 — 모드={cmd} 상태는 저장됨")
+            if pir_mode == "dnd":
+                return ws_cmd_result("ok", "방해금지 모드 설정 완료 (ESP32 미연결 — 알람 억제 적용)")
+            return ws_cmd_result("fail", "esp32_home2 미연결")
 
         # ── dnd_mode: ESP32에 pir_mode:dnd 전송 (LED 켜지 않도록) ──
         if pir_mode == "dnd":
+            logger.debug(f"[Router] dnd_mode 분기 진입 — pir_device={pir_device}")
             payload = (_j.dumps({
                 "cmd": "pir_mode",
                 "mode": "dnd",
                 "context": "dnd",
             }) + "\n").encode()
-            await self._tcp.send_command(pir_device, payload)
+            await self._tcp.send_command(pir_device, _sign_payload(payload))
             logger.info("[Router] 방해금지 모드 — ESP32 pir_mode:dnd 전송 (LED 차단)")
             msg = "방해금지 모드 설정 완료 — 모든 알람·팝업 무시, 로그 기록 유지"
             return ws_cmd_result("ok", msg)
@@ -451,7 +516,7 @@ class CommandRouter:
             "context": context,
         }) + "\n").encode()
 
-        success = await self._tcp.send_command(pir_device, payload)
+        success = await self._tcp.send_command(pir_device, _sign_payload(payload))
         if not success:
             return ws_cmd_result("fail", f"PIR 모드 설정 실패: {pir_mode}")
 
@@ -484,7 +549,7 @@ class CommandRouter:
                     payload_led = self._build_payload({
                         "cmd": "led", "room": room, "state": state_str
                     })
-                    if payload_led and await self._tcp.send_command(pir_device, payload_led):
+                    if payload_led and await self._tcp.send_command(pir_device, _sign_payload(payload_led)):
                         client.state[f"led_{pin}"] = prev_state
                         restored += 1
                 logger.info(f"[Router] {cmd}: LED 이전 상태 복원 ({restored}개)")
@@ -533,7 +598,7 @@ class CommandRouter:
                 payload_led = self._build_payload({
                     "cmd": "led", "room": room, "state": state_str
                 })
-                if payload_led and await self._tcp.send_command(pir_device, payload_led):
+                if payload_led and await self._tcp.send_command(pir_device, _sign_payload(payload_led)):
                     client.state[f"led_{pin}"] = prev_state
                     restored += 1
             logger.info(f"[Router] pir_dismiss: LED 스냅샷 복원 ({restored}개)")
@@ -601,7 +666,7 @@ class CommandRouter:
                 "value": float(value)
             }
             message = (_j.dumps(payload) + "\n").encode()
-            await self._tcp.send_command(seg7_device, message)
+            await self._tcp.send_command(seg7_device, _sign_payload(message))
         else:
             logger.warning("[Router] DEVICE_HOME1 연결 안됨 — seg7 전송 생략")
 

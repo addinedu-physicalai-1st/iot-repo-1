@@ -1,10 +1,14 @@
 """
 server/tcp_server.py
 ====================
-asyncio 기반 TCP 서버 - 다중 ESP32 클라이언트 관리  v3.1
+asyncio 기반 TCP 서버 - 다중 ESP32 클라이언트 관리  v3.2
 
-v3.1 변경사항:
-  - PIR 이벤트 수신 처리 추가 (_on_pir_event)
+v3.2 변경사항:
+  - send_command() HMAC-SHA256 서명 패킷 래핑 추가
+    · ESP32_SECRET 환경변수 필수 (없으면 서명 스킵 + 경고)
+    · 기존 bytes payload → {"ts":..., "sig":..., "cmd":{...}} JSON 래핑
+    · NIST SP 800-213 §4.2 / OWASP IoT OT1/OT3 대응
+    · ESP32 측 검증: docs/esp32_hmac_verify.cpp 참조
     · ESP32 → TCP로 전송되는 pir_event 타입 메시지 수신
     · guard_alert / presence_alert 이벤트 → WS 브로드캐스트
     · context(away/sleep/home) 별 메시지 생성
@@ -62,6 +66,19 @@ from protocol.schema import (
     cmd_query,
     ROOM_LED_PIN, ROOM_SERVO_PIN, ALL_ROOMS,
 )
+
+# ── HMAC-SHA256 서명 (v3.2) ────────────────────────────────────────
+import hashlib
+import hmac as _hmac
+import json as _json
+import os as _os
+import time as _time
+
+_ESP32_SECRET: bytes = _os.environ.get("ESP32_SECRET", "").encode()
+if not _ESP32_SECRET:
+    logging.getLogger(__name__).warning(
+        "[TCP] ESP32_SECRET 환경변수 없음 — HMAC 서명 비활성화 (평문 전송)"
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -400,16 +417,43 @@ class TCPServer:
 
     async def send_command(self, device_id: str, data: bytes) -> bool:
         """
-        특정 ESP32에 명령 전송
+        특정 ESP32에 명령 전송 (v3.2: HMAC-SHA256 서명 래핑)
+
+        ESP32_SECRET 환경변수가 있으면:
+          기존 bytes payload → JSON 파싱 → {"ts":..,"sig":..,"cmd":{..}} 래핑 후 전송
+        없으면:
+          기존 방식 그대로 전송 (하위 호환, 경고 로그)
+
         Returns: 전송 성공 여부
         """
         client = self._registry.get(device_id)
         if not client:
             logger.warning(f"[TCP] 디바이스 없음: {device_id}")
             return False
-        success = await client.send(data)
+
+        # ── HMAC 서명 래핑 ────────────────────────────────────────
+        if _ESP32_SECRET:
+            try:
+                cmd_dict = _json.loads(data.decode("utf-8").strip().rstrip(b"\n".decode()))
+                ts = str(int(_time.time()))
+                payload_bytes = _json.dumps(cmd_dict, ensure_ascii=False).encode()
+                msg = ts.encode() + b"." + payload_bytes
+                sig = _hmac.new(_ESP32_SECRET, msg, hashlib.sha256).hexdigest()
+                signed = _json.dumps(
+                    {"ts": ts, "sig": sig, "cmd": cmd_dict},
+                    ensure_ascii=False,
+                ) + "\n"
+                send_data = signed.encode()
+            except Exception as e:
+                logger.warning(f"[TCP] HMAC 서명 실패, 평문 전송: {e}")
+                send_data = data
+        else:
+            send_data = data
+        # ─────────────────────────────────────────────────────────
+
+        success = await client.send(send_data)
         if success:
-            logger.info(f"[TCP] → {device_id}: {data.decode().strip()}")
+            logger.info(f"[TCP] → {device_id}: {send_data.decode().strip()}")
         return success
 
     async def broadcast_command(self, data: bytes) -> tuple:

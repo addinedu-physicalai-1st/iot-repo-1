@@ -1,97 +1,327 @@
-# ============================================
-# Voice IoT Controller - Requirements
-# ============================================
-# 한국어 음성 명령으로 ESP32 스마트홈 디바이스를 제어하는 시스템
-# Python 3.12+ 필요
-# ============================================
-
-# ────────────────────────────────────────────
-# 웹 프레임워크 & 서버
-# ────────────────────────────────────────────
-fastapi==0.129.0
-python-multipart==0.0.20
-uvicorn[standard]==0.41.0
-websockets==16.0
-starlette==0.52.1
-
-# ────────────────────────────────────────────
-# STT (Speech-to-Text) - 음성 인식
-# ────────────────────────────────────────────
-openai-whisper==20250625
-sounddevice==0.5.5
-soundfile==0.13.1
-numpy==2.4.2
-noisereduce==3.0.3
-
-# ────────────────────────────────────────────
-# LLM (Large Language Model) - 자연어 처리
-# Ollama REST API는 httpx로 직접 호출 (ollama 패키지 불필요)
-# ────────────────────────────────────────────
-httpx==0.28.1
-
-# ────────────────────────────────────────────
-# TTS (Text-to-Speech) - 음성 합성
-# ────────────────────────────────────────────
+absl-py==2.4.0
+action-msgs==2.0.3
+action-tutorials-interfaces==0.33.9
+action-tutorials-py==0.33.9
+actionlib-msgs==5.3.6
+aiohappyeyeballs==2.6.1
+aiohttp==3.13.3
+aiomysql==0.2.0
+aiosignal==1.4.0
+albucore==0.0.24
+albumentations==2.0.8
+ament-cmake-test==2.5.5
+ament-copyright==0.17.4
+ament-cppcheck==0.17.4
+ament-cpplint==0.17.4
+ament-flake8==0.17.4
+ament-index-python==1.8.2
+ament-lint==0.17.4
+ament-lint-cmake==0.17.4
+ament-package==0.16.5
+ament-pep257==0.17.4
+ament-uncrustify==0.17.4
+ament-xmllint==0.17.4
+angles==1.16.1
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.12.1
+attrs==25.4.0
+babel==2.18.0
+bcrypt==5.0.0
+builtin-interfaces==2.0.3
+certifi==2026.2.25
+cffi==2.0.0
+charset-normalizer==3.4.5
+click==8.3.1
+colorama==0.4.6
+composition-interfaces==2.0.3
+contourpy==1.3.3
+control-msgs==5.7.0
+controller-manager==4.42.2
+controller-manager-msgs==4.42.2
+cryptography==46.0.5
+csvw==3.7.0
+cuda-bindings==12.9.4
+cuda-pathfinder==1.4.0
+cv-bridge==4.1.0
+cycler==0.12.1
+Cython==3.2.4
+demo-nodes-py==0.33.9
+diagnostic-msgs==5.3.6
+diagnostic-updater==4.2.6
+dlinfo==2.0.0
+domain-bridge==0.5.0
+domain-coordinator==0.12.0
+easydict==1.13
+ecdsa==0.19.1
 edge-tts==7.2.7
-
-# ────────────────────────────────────────────
-# TTS - Kokoro (선택사항 - 로컬 ONNX TTS)
-# models/kokoro-v0_19.onnx 파일 별도 필요 (.gitignore 처리됨)
-# ────────────────────────────────────────────
-kokoro-onnx==0.5.0
-onnxruntime==1.24.2
-
-# ────────────────────────────────────────────
-# 웨이크워드 감지
-# ────────────────────────────────────────────
-pvporcupine==4.0.2
-
-# ────────────────────────────────────────────
-# 카메라 / 얼굴인식 / 객체탐지 (선택사항)
-# pip install opencv-python-headless ultralytics insightface onnxruntime
-# ────────────────────────────────────────────
-opencv-python-headless==4.13.0.92
-ultralytics==8.4.16
+espeakng-loader==0.2.4
+example-interfaces==0.12.0
+examples-rclpy-executors==0.19.7
+examples-rclpy-minimal-action-client==0.19.7
+examples-rclpy-minimal-action-server==0.19.7
+examples-rclpy-minimal-client==0.19.7
+examples-rclpy-minimal-publisher==0.19.7
+examples-rclpy-minimal-service==0.19.7
+examples-rclpy-minimal-subscriber==0.19.7
+fastapi==0.129.0
+filelock==3.25.0
+flatbuffers==25.12.19
+fonttools==4.61.1
+frozenlist==1.8.0
+fsspec==2026.2.0
+generate-parameter-library-py==0.6.0
+geometry-msgs==5.3.6
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.7.1
+httpx==0.28.1
+idna==3.11
+image-geometry==4.1.0
+ImageIO==2.37.2
+iniconfig==2.3.0
 insightface==0.7.3
-
-# ────────────────────────────────────────────
-# 설정 & 유틸리티
-# ────────────────────────────────────────────
-python-dotenv==1.1.0
-PyYAML==6.0.3
+interactive-markers==2.5.5
+isodate==0.7.2
+jax==0.9.1
+jaxlib==0.9.1
+Jinja2==3.1.6
+joblib==1.5.3
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+kiwisolver==1.4.9
+kokoro-onnx==0.5.0
+language-tags==1.2.0
+laser-geometry==2.7.2
+launch==3.4.10
+launch-ros==0.26.11
+launch-testing==3.4.10
+launch-testing-ros==0.26.11
+launch-xml==3.4.10
+launch-yaml==3.4.10
+lazy_loader==0.4
+lifecycle-msgs==2.0.3
+llvmlite==0.46.0
+logging-demo==0.33.9
+map-msgs==2.4.1
+MarkupSafe==3.0.3
+matplotlib==3.10.8
+mediapipe==0.10.14
+message-filters==4.11.10
+ml_dtypes==0.5.4
+more-itertools==10.8.0
+moveit-msgs==2.6.0
+mpmath==1.3.0
+multidict==6.7.1
+nav-msgs==5.3.6
+networkx==3.6.1
+noisereduce==3.0.3
+numba==0.64.0
+numpy==2.4.2
+nvidia-cublas-cu12==12.8.4.1
+nvidia-cuda-cupti-cu12==12.8.90
+nvidia-cuda-nvrtc-cu12==12.8.93
+nvidia-cuda-runtime-cu12==12.8.90
+nvidia-cudnn-cu12==9.10.2.21
+nvidia-cufft-cu12==11.3.3.83
+nvidia-cufile-cu12==1.13.1.3
+nvidia-curand-cu12==10.3.9.90
+nvidia-cusolver-cu12==11.7.3.90
+nvidia-cusparse-cu12==12.5.8.93
+nvidia-cusparselt-cu12==0.7.1
+nvidia-nccl-cu12==2.27.5
+nvidia-nvjitlink-cu12==12.8.93
+nvidia-nvshmem-cu12==3.4.5
+nvidia-nvtx-cu12==12.8.90
+object-recognition-msgs==2.0.0
+octomap-msgs==2.0.1
+onnx==1.20.1
+onnxruntime==1.24.2
+openai-whisper==20250625
+opencv-contrib-python==4.13.0.92
+opencv-python==4.13.0.92
+opencv-python-headless==4.13.0.92
+opt_einsum==3.4.0
+osrf-pycommon==2.1.7
+packaging==26.0
+pal-statistics==2.7.0
+pal-statistics-msgs==2.7.0
+passlib==1.7.4
+pcl-msgs==1.0.0
+pendulum-msgs==0.33.9
+phonemizer-fork==3.3.2
+pillow==12.1.1
+play-motion-builder-msgs==1.4.0
+play-motion2==1.8.0
+play-motion2-msgs==1.8.0
+pluggy==1.6.0
+polars==1.38.1
+polars-runtime-32==1.38.1
+prettytable==3.17.0
+propcache==0.4.1
+protobuf==4.25.8
+psutil==7.2.2
+pvporcupine==4.0.2
+pyasn1==0.6.2
+pycparser==3.0
 pydantic==2.12.5
 pydantic_core==2.41.5
-
-# ────────────────────────────────────────────
-# HTTP 클라이언트 (Whisper API 호출용)
-# ────────────────────────────────────────────
-requests==2.32.5
-
-# ────────────────────────────────────────────
-# GUI (선택사항 - PyQt6 데스크탑 대시보드)
-# ────────────────────────────────────────────
+Pygments==2.19.2
+PyMySQL==1.1.1
+pyparsing==3.3.2
 PyQt6==6.10.2
 PyQt6-Qt6==6.10.2
 PyQt6_sip==13.11.0
 pyqtgraph==0.14.0
-
-# ────────────────────────────────────────────
-# Database (SR-3.1 / SR-3.2)
-# ────────────────────────────────────────────
-aiomysql==0.2.0
-PyMySQL==1.1.1
-
-# ────────────────────────────────────────────
-# 테스트
-# ────────────────────────────────────────────
 pytest==9.0.2
 pytest-asyncio==1.3.0
-
-# ============================================
-# 설치 방법:
-# ============================================
-# pip install -r requirements.txt
-#
-# 카메라/얼굴인식 없이 최소 설치:
-# pip install fastapi uvicorn openai-whisper edge-tts pvporcupine httpx aiomysql PyYAML pydantic requests noisereduce sounddevice
-# ============================================
+python-dateutil==2.9.0.post0
+python-dotenv==1.1.0
+python-jose==3.5.0
+python-multipart==0.0.20
+python-qt-binding==2.2.2
+PyYAML==6.0.3
+qt-dotgraph==2.7.5
+qt-gui==2.7.5
+qt-gui-cpp==2.7.5
+qt-gui-py-common==2.7.5
+quality-of-service-demo-py==0.33.9
+rcl-interfaces==2.0.3
+rclpy==7.1.9
+rcutils==6.7.5
+rdflib==7.6.0
+referencing==0.37.0
+regex==2026.2.28
+requests==2.32.5
+resource-retriever==3.4.4
+rfc3986==1.5.0
+rmw-dds-common==3.1.1
+ros-image-to-qimage==0.4.1
+ros2action==0.32.8
+ros2bag==0.26.9
+ros2bag-mcap-cli==0.26.9
+ros2bag-sqlite3-cli==0.26.9
+ros2cli==0.32.8
+ros2component==0.32.8
+ros2doctor==0.32.8
+ros2interface==0.32.8
+ros2launch==0.26.11
+ros2lifecycle==0.32.8
+ros2multicast==0.32.8
+ros2node==0.32.8
+ros2param==0.32.8
+ros2pkg==0.32.8
+ros2plugin==5.4.4
+ros2run==0.32.8
+ros2service==0.32.8
+ros2topic==0.32.8
+rosbag2-interfaces==0.26.9
+rosbag2-py==0.26.9
+rosgraph-msgs==2.0.3
+rosidl-adapter==4.6.7
+rosidl-cli==4.6.7
+rosidl-cmake==4.6.7
+rosidl-generator-c==4.6.7
+rosidl-generator-cpp==4.6.7
+rosidl-generator-py==0.22.2
+rosidl-generator-type-description==4.6.7
+rosidl-parser==4.6.7
+rosidl-pycommon==4.6.7
+rosidl-runtime-py==0.13.1
+rosidl-typesupport-c==3.2.2
+rosidl-typesupport-cpp==3.2.2
+rosidl-typesupport-fastrtps-c==3.6.3
+rosidl-typesupport-fastrtps-cpp==3.6.3
+rosidl-typesupport-introspection-c==4.6.7
+rosidl-typesupport-introspection-cpp==4.6.7
+rpds-py==0.30.0
+rpyutils==0.4.2
+rqt==1.6.3
+rqt-action==2.2.1
+rqt-bag==1.5.6
+rqt-bag-plugins==1.5.6
+rqt-console==2.2.2
+rqt-controller-manager==4.42.2
+rqt-dotgraph==0.0.5
+rqt-gauges==0.0.3
+rqt-graph==1.5.6
+rqt-gui==1.6.3
+rqt-gui-py==1.6.3
+rqt-joint-trajectory-controller==4.36.0
+rqt-moveit==1.0.1
+rqt-msg==1.5.2
+rqt-plot==1.4.5
+rqt-publisher==1.7.3
+rqt-py-common==1.6.3
+rqt-py-console==1.2.3
+rqt-reconfigure==1.6.3
+rqt-robot-dashboard==0.5.8
+rqt-robot-monitor==1.0.6
+rqt-robot-steering==2.0.0
+rqt-runtime-monitor==1.0.0
+rqt-service-caller==1.2.2
+rqt-shell==1.2.3
+rqt-srv==1.2.3
+rqt-tf-tree==1.0.5
+rqt-topic==1.7.5
+rsa==4.9.1
+scikit-image==0.26.0
+scikit-learn==1.8.0
+scipy==1.17.1
+segments==2.3.0
+sensor-msgs==5.3.6
+sensor-msgs-py==5.3.6
+service-msgs==2.0.3
+setuptools==82.0.0
+shape-msgs==5.3.6
+simsimd==6.5.15
+six==1.17.0
+sounddevice==0.5.5
+soundfile==0.13.1
+srdfdom==2.0.7
+sros2==0.13.5
+starlette==0.52.1
+statistics-msgs==2.0.3
+std-msgs==5.3.6
+std-srvs==5.3.6
+stereo-msgs==5.3.6
+stringzilla==4.6.0
+sympy==1.14.0
+tabulate==0.10.0
+teleop-twist-keyboard==2.4.1
+termcolor==3.3.0
+tf-transformations==1.1.0
+tf2-geometry-msgs==0.36.19
+tf2-kdl==0.36.19
+tf2-msgs==0.36.19
+tf2-py==0.36.19
+tf2-ros-py==0.36.19
+tf2-sensor-msgs==0.36.19
+tf2-tools==0.36.19
+theora-image-transport==4.0.6
+threadpoolctl==3.6.0
+tifffile==2026.3.3
+tiktoken==0.12.0
+topic-monitor==0.33.9
+torch==2.10.0
+torchvision==0.25.0
+tqdm==4.67.3
+trajectory-msgs==5.3.6
+triton==3.6.0
+turtlesim==1.8.3
+type-description-interfaces==2.0.3
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+ultralytics==8.4.16
+ultralytics-thop==2.0.18
+unique-identifier-msgs==2.5.0
+urdfdom-py==1.2.1
+uritemplate==4.2.0
+urllib3==2.6.3
+uvicorn==0.41.0
+uvloop==0.22.1
+visualization-msgs==5.3.6
+watchfiles==1.1.1
+wcwidth==0.6.0
+websockets==16.0
+yarl==1.23.0

@@ -26,6 +26,33 @@ set -e
 # 프로젝트 루트로 이동
 cd "$(dirname "$0")"
 
+# ── .env 로드 (없으면 .env_example 복사 후 JWT_SECRET 자동 생성) ──
+if [ ! -f ".env" ]; then
+    if [ -f ".env_example" ]; then
+        cp .env_example .env
+        echo ".env 생성 완료 (.env_example 복사)"
+    else
+        touch .env
+        echo ".env 신규 생성"
+    fi
+fi
+
+# JWT_SECRET 없거나 빈 값일 때만 최초 1회 생성 (재시작해도 유지)
+if ! grep -q "^JWT_SECRET=.\+" .env 2>/dev/null; then
+    JWT_VAL=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+    sed -i '/^JWT_SECRET=/d' .env
+    echo "JWT_SECRET=${JWT_VAL}" >> .env
+    echo "[보안] JWT_SECRET 최초 생성 완료"
+else
+    echo "[보안] JWT_SECRET 기존 값 유지"
+fi
+
+# .env 로드 (단일 로드)
+set -a
+source .env
+set +a
+echo ".env 환경변수 로드 완료"
+
 # 기존 프로세스 정리 (포트 충돌 방지)
 echo "기존 프로세스 정리 중..."
 ./scripts/run_nginx.sh stop 2>/dev/null || true
@@ -47,16 +74,6 @@ trap cleanup_nginx EXIT
 if [ -d ".venv" ] && [ -f ".venv/bin/activate" ]; then
     echo "가상환경 활성화: .venv"
     source .venv/bin/activate
-fi
-
-# .env 파일 로드
-if [ -f ".env" ]; then
-    set -a
-    source .env
-    set +a
-    echo ".env 환경변수 로드 완료"
-else
-    echo "경고: .env 파일 없음 — cp .env_example .env 로 생성하세요"
 fi
 
 # Ollama 실행 확인
@@ -99,6 +116,16 @@ fi
 
 echo ""
 echo "서버 시작 중... (TCP:9000 / HTTP+WS:8000)"
+echo ""
+
+# ── CVE 취약점 자동 스캔 (백그라운드 실행, 서버 시작 차단 안 함) ──
+if command -v pip-audit &>/dev/null || pip show pip-audit &>/dev/null 2>&1; then
+  echo "[AUDIT] 백그라운드 CVE 스캔 시작..."
+  bash scripts/audit.sh >> logs/audit/latest.log 2>&1 &
+  echo "[AUDIT] 완료 후 logs/audit/ 에서 결과 확인 가능"
+else
+  echo "[AUDIT] pip-audit 미설치 — 스킵 (설치: pip install pip-audit)"
+fi
 echo ""
 
 # uvicorn 백그라운드 실행

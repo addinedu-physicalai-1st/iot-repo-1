@@ -1,6 +1,6 @@
 """
 camera_stream.py — ESP-CAM UDP 수신 + MJPEG WebSocket 스트리밍
-v2.0 | Voice IoT Controller
+v2.2 | Voice IoT Controller
 - v1.1: SOI/EOI 자동 조립, FPS/품질 최적화
 - v1.2: 디버그 로그 강화 (패킷 수신 확인용)
 - v1.3: cam_verdict WS 브로드캐스트 (매 분석마다 Command Log 기록)
@@ -15,7 +15,11 @@ v2.0 | Voice IoT Controller
          verdict 캐시·cam_verdict·cam_alert·TTS·서버 로그 모두 억제
          MJPEG 오버레이도 쿨다운 중 CLEAR 유지
 - v1.9: 보안모드(dnd) 알람 억제, SmartGate 활성 시 frame_analyzer 분석 skip
+- v2.1: dnd 모드 시 unknown 로그 + intruder 알람/TTS 완전 억제
 - v2.0: known 알림 "귀가"→"인식" 변경, known 쿨다운 10초→60초
+- v2.2: UDP IP 화이트리스트 (MEDIUM-5) — 비인가 IP 패킷 차단
+         simple/multipart 수신 모두 적용, .env CAM_ALLOWED_IPS 또는
+         settings.yaml camera.allowed_ips 로 관리
 
 ESP-CAM → UDP (JPEG 프레임) → Python 수신
     → frame_analyzer 분석 (매 ANALYZE_EVERY 프레임)
@@ -26,17 +30,81 @@ ESP-CAM → UDP (JPEG 프레임) → Python 수신
 
 import asyncio
 import logging
+import os
 import socket
 import struct
 import threading
 import time
 from collections import deque
-from typing import Optional
+from typing import Optional, Set
 
 import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────
+# v2.2: UDP IP 화이트리스트
+# ──────────────────────────────────────────
+# 허용 IP 집합 (main.py startup에서 set_allowed_cam_ips()로 주입)
+# 빈 집합이면 필터링 비활성화 (경고 로그 출력)
+_allowed_cam_ips: Set[str] = set()
+# 비인가 IP별 차단 횟수 (로그 폭발 방지용)
+_blocked_ip_counter: dict = {}
+
+
+def set_allowed_cam_ips(ips: Set[str]) -> None:
+    """허용 IP 집합 주입 (main.py startup에서 호출)"""
+    global _allowed_cam_ips
+    _allowed_cam_ips = set(ips)
+    if _allowed_cam_ips:
+        logger.info("[CameraStream] UDP IP 화이트리스트 설정: %s", _allowed_cam_ips)
+    else:
+        logger.warning("[CameraStream] UDP IP 화이트리스트 미설정 — IP 필터링 비활성화 (보안 위험)")
+
+
+def load_allowed_cam_ips(settings: dict) -> Set[str]:
+    """
+    허용 IP 목록 로드.
+    우선순위: 환경변수 CAM_ALLOWED_IPS > settings.yaml camera.allowed_ips
+    main.py startup에서 호출 후 set_allowed_cam_ips()로 주입.
+
+    예)
+        .env:           CAM_ALLOWED_IPS=192.168.0.50,192.168.0.51
+        settings.yaml:  camera.allowed_ips: ["192.168.0.50", "192.168.0.51"]
+    """
+    env_val = os.getenv("CAM_ALLOWED_IPS", "").strip()
+    if env_val:
+        ips = {ip.strip() for ip in env_val.split(",") if ip.strip()}
+        logger.info("[CameraStream] IP 화이트리스트 로드 (env): %s", ips)
+        return ips
+
+    yaml_ips = settings.get("camera", {}).get("allowed_ips", [])
+    if yaml_ips:
+        ips = set(yaml_ips)
+        logger.info("[CameraStream] IP 화이트리스트 로드 (yaml): %s", ips)
+        return ips
+
+    logger.warning("[CameraStream] CAM_ALLOWED_IPS 미설정 — UDP IP 필터링 비활성화")
+    return set()
+
+
+def _check_allowed_ip(src_ip: str) -> bool:
+    """
+    IP 화이트리스트 검사.
+    허용 목록이 비어 있으면 항상 True (필터링 비활성).
+    비인가 IP는 100회마다 1회 WARNING 로그.
+    """
+    if not _allowed_cam_ips:
+        return True
+    if src_ip in _allowed_cam_ips:
+        return True
+    cnt = _blocked_ip_counter.get(src_ip, 0) + 1
+    _blocked_ip_counter[src_ip] = cnt
+    if cnt % 100 == 1:
+        logger.warning("[CameraStream] 비인가 IP 차단: %s (누적 %d회)", src_ip, cnt)
+    return False
 
 # ──────────────────────────────────────────
 # 설정
@@ -224,6 +292,10 @@ def _udp_simple_receiver():
         pkt_count += 1
         now = time.time()
 
+        # ── v2.2: IP 화이트리스트 검사 ──
+        if not _check_allowed_ip(addr[0]):
+            continue
+
         # ── 단일 완전 JPEG (SOI + EOI 모두 포함) ──
         if data[:2] == b'\xff\xd8' and data[-2:] == b'\xff\xd9':
             frame_buf = b""
@@ -313,6 +385,10 @@ def _udp_multipart_receiver():
             break
 
         if len(data) < HEADER_SIZE:
+            continue
+
+        # ── v2.2: IP 화이트리스트 검사 ──
+        if not _check_allowed_ip(addr[0]):
             continue
 
         magic, frame_id, total_len, part_idx, total_parts = \
@@ -534,6 +610,7 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
         # 인증 성공 후 120초 동안은 intruder → clear 강제 변환
         # (인증된 사용자가 현관에 머무를 때 미등록 오탐 방지)
         _suppress_intruder = False
+        _suppress_reason   = ""
 
         if label == "intruder":
             # 1) 보안모드가 방해 금지(dnd)이면 억제
@@ -542,6 +619,7 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
                     _sec_mode = _get_security_mode()
                     if _sec_mode == "dnd":
                         _suppress_intruder = True
+                        _suppress_reason   = "dnd"
                         logger.debug(
                             f"[CameraStream] 보안모드 '{_sec_mode}' → intruder 억제"
                         )
@@ -553,6 +631,7 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
                 sg_status = _smartgate_manager.status
                 if sg_status.get("in_cooldown", False):
                     _suppress_intruder = True
+                    _suppress_reason   = "cooldown"
                     logger.debug(
                         "[CameraStream] 쿨다운 중 intruder → clear 억제 "
                         f"(conf={_conf:.0%})"
@@ -562,12 +641,21 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
             if not _suppress_intruder and _last_known_time > 0:
                 if (time.time() - _last_known_time) < _KNOWN_SUPPRESS_SEC:
                     _suppress_intruder = True
+                    _suppress_reason   = "known_recent"
                     logger.debug(
                         f"[CameraStream] known 감지 후 {time.time() - _last_known_time:.0f}s → "
                         f"intruder 억제 (conf={_conf:.0%})"
                     )
 
             if _suppress_intruder:
+                # dnd 억제 시: cooldown 갱신 + 로그 기록 후 label → clear
+                # (cooldown 미갱신 시 30초 후 억제 없이 알람 재발생하는 버그 방지)
+                if _suppress_reason == "dnd":
+                    if now - cooldown["intruder"] > COOLDOWN_SEC["intruder"]:
+                        cooldown["intruder"] = now
+                        logger.debug(
+                            "[CameraStream] 방해금지 모드 — intruder 쿨다운 갱신 + 알람/TTS 억제"
+                        )
                 label = "clear"
                 verdict["label"] = "clear"
                 with _verdict_lock:
@@ -608,11 +696,14 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
                 cooldown["known"] = now
                 logger.info(f"[CameraStream] ✅ KNOWN: {_name} (conf={_conf:.0%})")
         elif label == "intruder":
+            # dnd 억제는 위에서 처리됨 → 여기 도달 시 억제 없는 실제 intruder
             if now - cooldown["unknown"] > COOLDOWN_SEC["unknown"]:
                 cooldown["unknown"] = now
                 logger.warning(f"[CameraStream] ❓ UNKNOWN 인물 감지 (conf={_conf:.0%})")
 
         # ── 알람 브로드캐스트 ──
+        # dnd 억제는 위 _suppress_intruder 블록에서 처리됨
+        # 이 블록 도달 시 label == "intruder" 이면 반드시 알람 발생 대상
         if label == "intruder":
             if now - cooldown["intruder"] > COOLDOWN_SEC["intruder"]:
                 cooldown["intruder"] = now

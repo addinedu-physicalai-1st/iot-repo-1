@@ -15,6 +15,10 @@
 #define WIFI_PASSWORD  "201class2!"
 
 // ── 서버 IP (Python 서버) ────────────────────
-#define SERVER_IP      "192.168.0.189"
+#define SERVER_IP      "192.168.0.154"
+
+// ── HMAC 서명 키 (서버 .env의 ESP32_SECRET 값과 동일) ──
+
+#define ESP32_SECRET   "568e4910e7476668026fb27692ff20d4"
 
 #endif // CONFIG_H
