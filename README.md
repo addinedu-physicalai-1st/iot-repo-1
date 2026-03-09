@@ -96,9 +96,7 @@ iot-repo-1/
 │   ├── download_models.sh           # 모델 파일 다운로드
 │   ├── ssl_generate_cert.sh         # HTTPS 자체 서명 인증서 생성
 │   ├── run_nginx.sh                 # nginx 역방향 프록시 실행
-│   ├── relay_server.py              # YouTube → MP3 중계 서버 (BT Speaker용)
-│   ├── start_relay.sh               # 중계 서버 시작
-│   └── stop_relay.sh                # 중계 서버 중지
+│   └── relay_server.py              # YouTube → MP3 중계 서버 (BT Speaker용)
 ├── nginx/
 │   ├── nginx.conf                   # HTTPS 역방향 프록시 설정
 │   ├── ssl/                         # 인증서 (Git 미포함)
@@ -174,6 +172,7 @@ nano .env
 | `CAM_ALLOWED_IPS` | UDP 카메라 허용 IP 목록 (쉼표 구분, settings.yaml 오버라이드) | `192.168.0.19,192.168.0.20` |
 | `RELAY_PORT` | YouTube 중계 서버 포트 | `8080` |
 | `RELAY_ALLOWED_IPS` | 중계 서버 접근 허용 IP (ESP32 WiFi IP, 쉼표 구분) | `192.168.0.xx` |
+| `BT_SPEAKER_URL` | ESP32 BT 스피커 웹서버 URL | `http://192.168.0.xx` |
 
 > `.env`는 `.gitignore`에 포함되어 Git에 커밋되지 않습니다.
 
@@ -252,6 +251,7 @@ DISABLE_STT=1 DISABLE_TTS=1 ./run_server.sh
 
 - **HOUSE MAP** — 3D 홈 평면도, 디바이스 상태 실시간 표시
 - **SENSOR PANEL** — DHT22 온도/습도, PIR 보안 상태
+- **BT 스피커** — YouTube 음악 스트리밍 제어 (재생/정지/이전/다음, 볼륨, 플레이리스트 관리)
 - **COMMAND LOG** — 명령 실행 이력
 - **DB EVENT LOG** — MySQL 이벤트 로그 검색/조회 + 패턴 분석
 
@@ -294,6 +294,21 @@ Authorization: Bearer <token>
 | GET | `/logs/pattern/devices` | 디바이스별 활동량 |
 | GET | `/logs/pattern/anomalies` | 이상 패턴 탐지 |
 
+### BT 스피커 API
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/bt-speaker/status` | BT 스피커 상태 (WiFi, BT, 스트리밍, 볼륨) |
+| GET | `/bt-speaker/playlist` | 플레이리스트 조회 |
+| POST | `/bt-speaker/playlist/add` | YouTube URL 추가 (`url`, `title`) |
+| POST | `/bt-speaker/playlist/del` | 트랙 삭제 (`idx`) |
+| POST | `/bt-speaker/playlist/clear` | 플레이리스트 초기화 |
+| POST | `/bt-speaker/play` | 트랙 재생 (`idx`) |
+| POST | `/bt-speaker/stop` | 재생 정지 |
+| POST | `/bt-speaker/prev` | 이전 트랙 |
+| POST | `/bt-speaker/next` | 다음 트랙 |
+| POST | `/bt-speaker/volume` | 볼륨 설정 (`v`: 0-100) |
+
 ### SmartGate API
 
 | 메서드 | 경로 | 설명 |
@@ -331,11 +346,11 @@ ESP32-WROVER(CH-340)가 WiFi + Bluetooth A2DP로 PLEIGO BS15 스피커에 YouTub
 ### 아키텍처
 
 ```
-[웹 브라우저] → HTTP → [ESP32-WROVER :80] → HTTP → [PC 중계서버 :8080]
-                              │                           │
-                        BT A2DP Source              yt-dlp + ffmpeg
-                              │                     (YouTube → MP3)
-                       [BT 스피커]
+[웹 대시보드] → FastAPI /bt-speaker/* (JWT) → [ESP32-WROVER :80] → HTTP → [PC 중계서버 :8080]
+                                                      │                           │
+                                                BT A2DP Source              yt-dlp + ffmpeg
+                                                      │                     (YouTube → MP3)
+                                               [BT 스피커]
 ```
 
 ### 하드웨어
@@ -371,17 +386,18 @@ nano config.h  # WiFi SSID/PW, BT 스피커 이름, 중계서버 IP 설정
 python3 -m venv .relay-venv
 .relay-venv/bin/pip install flask yt-dlp
 
-# .env에 RELAY_PORT, RELAY_ALLOWED_IPS 설정 후 실행
-./scripts/start_relay.sh   # 시작
-./scripts/stop_relay.sh    # 중지
+# .env에 RELAY_PORT, RELAY_ALLOWED_IPS 설정 후
+# run_server.sh가 자동으로 relay 서버도 함께 시작합니다.
+./run_server.sh    # 전체 서버 시작 (relay 포함)
+./kill_server.sh   # 전체 서버 종료 (relay 포함)
 ```
 
 ### 사용
 
-1. ESP32에 펌웨어 업로드 후 시리얼 모니터에서 IP 확인
-2. PC에서 중계 서버 실행
-3. 브라우저에서 `http://<ESP32_IP>` 접속
-4. YouTube URL 추가 후 재생 → BT 스피커에서 음악 출력
+1. ESP32-WROVER에 펌웨어 업로드 후 시리얼 모니터에서 IP 확인
+2. `.env`에 `BT_SPEAKER_URL=http://<ESP32_IP>` 설정
+3. `./run_server.sh`로 서버 시작 (relay 서버 자동 포함)
+4. 웹 대시보드 BT 스피커 카드에서 YouTube URL 추가 → 재생 → BT 스피커 출력
 
 ---
 
@@ -411,7 +427,9 @@ python3 -m venv .relay-venv
 |------|----------|-----------|
 | UI → Server | HTTP / WebSocket | JWT Bearer 인증 |
 | Server → ESP32 | TCP :9000 | HMAC-SHA256 서명 + 타임스탬프 |
+| Server → ESP32-WROVER | HTTP (프록시) | JWT 인증 + 내부 네트워크 |
 | ESP32-CAM → Server | UDP :5005 | IP 화이트리스트 (`settings.yaml camera.allowed_ips`) |
+| ESP32-WROVER → Relay | HTTP :8080 | IP 화이트리스트 (`.env RELAY_ALLOWED_IPS`) |
 
 ### TCP HMAC 서명 포맷
 

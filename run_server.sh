@@ -58,6 +58,8 @@ echo "기존 프로세스 정리 중..."
 ./scripts/run_nginx.sh stop 2>/dev/null || true
 kill $(lsof -t -i:9000) 2>/dev/null || true
 kill $(lsof -t -i:8000) 2>/dev/null || true
+RELAY_PORT="${RELAY_PORT:-8080}"
+kill $(lsof -t -i:"$RELAY_PORT") 2>/dev/null || true
 sleep 1
 
 # nginx 종료 트랩 (스크립트 종료 시 자동 실행)
@@ -127,6 +129,27 @@ else
   echo "[AUDIT] pip-audit 미설치 — 스킵 (설치: pip install pip-audit)"
 fi
 echo ""
+
+# ── YouTube → MP3 중계 서버 (relay_server) ──
+if [ -n "$RELAY_PORT" ]; then
+  if lsof -i :"$RELAY_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo "Relay 서버: 포트 $RELAY_PORT 이미 사용 중 — 스킵"
+  else
+    echo "Relay 서버 시작 중 (port $RELAY_PORT)..."
+    RELAY_PYTHON="python3"
+    [ -f ".relay-venv/bin/python3" ] && RELAY_PYTHON=".relay-venv/bin/python3"
+    nohup $RELAY_PYTHON scripts/relay_server.py > /tmp/relay_server.log 2>&1 &
+    RELAY_PID=$!
+    sleep 2
+    if lsof -i :"$RELAY_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "Relay 서버 시작 완료 (PID: $RELAY_PID, log: /tmp/relay_server.log)"
+    else
+      echo "경고: Relay 서버 시작 실패 — /tmp/relay_server.log 확인"
+    fi
+  fi
+else
+  echo "Relay 서버: RELAY_PORT 미설정 — 스킵"
+fi
 
 # uvicorn 백그라운드 실행
 uvicorn server.main:app --host 0.0.0.0 --port 8000 &

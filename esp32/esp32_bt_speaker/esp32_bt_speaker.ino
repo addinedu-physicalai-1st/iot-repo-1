@@ -235,165 +235,6 @@ void httpStreamTask(void* param) {
 // ===== Web Server =====
 WebServer server(80);
 
-// ===== Web UI (임베디드 HTML) =====
-const char INDEX_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>IoT Music Player</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:20px;max-width:480px;margin:0 auto}
-h1{text-align:center;color:#ff4444;margin-bottom:20px;font-size:22px}
-.card{background:#16213e;border-radius:12px;padding:16px;margin-bottom:16px}
-.status{display:flex;justify-content:space-between;align-items:center;margin:6px 0}
-.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px}
-.g{background:#00ff88}.r{background:#ff4444}
-input[type="text"]{width:100%;padding:12px;border:1px solid #333;border-radius:8px;background:#0f3460;color:#fff;font-size:14px;margin:8px 0}
-.btn-row{display:flex;gap:8px;margin-top:8px}
-button{padding:12px;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600}
-.ba{background:#ff4444;color:#fff;flex:1}
-.bs{background:#555;color:#fff;flex:1}
-label{color:#888;font-size:11px;text-transform:uppercase;letter-spacing:1px}
-.ss{font-size:13px}
-.vol-row{display:flex;align-items:center;gap:10px;margin-top:6px}
-.vol-row span{min-width:32px;text-align:center;font-size:14px;color:#00d2ff;font-weight:600}
-input[type="range"]{-webkit-appearance:none;appearance:none;flex:1;height:6px;border-radius:3px;background:#0f3460;outline:none}
-input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;border-radius:50%;background:#00d2ff;cursor:pointer;border:2px solid #16213e}
-.vol-btn{width:36px;height:36px;border-radius:50%;background:#0f3460;border:1px solid #1a5276;color:#00d2ff;font-size:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:none}
-.vol-btn:active{background:#1a5276}
-.nav-row{display:flex;gap:8px;margin-top:12px}
-.nav-btn{flex:1;padding:14px;background:#0f3460;border:1px solid #1a5276;color:#00d2ff;border-radius:8px;font-size:20px;cursor:pointer;font-weight:700}
-.nav-btn:active{background:#1a5276}
-.now-playing{text-align:center;color:#00ff88;font-size:14px;margin-top:10px;min-height:20px}
-.pl-item{display:flex;align-items:center;padding:8px;margin:4px 0;background:#0f3460;border-radius:8px;gap:8px}
-.pl-item.active{border:1px solid #ff4444;background:#1a1a3e}
-.pl-num{color:#555;font-size:12px;min-width:20px;text-align:center}
-.pl-title{flex:1;font-size:13px;color:#ccc;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pl-title:hover{color:#fff}
-.pl-del{background:none;border:none;color:#ff4444;font-size:16px;cursor:pointer;padding:4px 8px;flex:none;font-weight:400}
-.pl-del:hover{color:#ff6666}
-.msg{text-align:center;color:#ffaa00;font-size:12px;margin-top:8px;min-height:16px}
-.pl-empty{text-align:center;color:#555;font-size:13px;padding:16px}
-</style>
-</head>
-<body>
-<h1>IoT Music Player</h1>
-<div class="card">
-<label>System Status</label>
-<div class="status"><span>WiFi</span><span class="ss"><span class="dot g"></span><span id="wip">-</span></span></div>
-<div class="status"><span>Bluetooth</span><span class="ss"><span class="dot" id="bd"></span><span id="bs">-</span></span></div>
-<div class="status"><span>Stream</span><span class="ss" id="ss">-</span></div>
-</div>
-<div class="card">
-<label>Now Playing</label>
-<div class="now-playing" id="np">-</div>
-<div class="nav-row">
-<button class="nav-btn" onclick="nav('prev')">&#9664; Prev</button>
-<button class="nav-btn" onclick="st()" style="background:#ff4444;color:#fff;flex:0.6;font-size:15px">Stop</button>
-<button class="nav-btn" onclick="nav('next')">Next &#9654;</button>
-</div>
-</div>
-<div class="card">
-<label>Volume</label>
-<div class="vol-row">
-<button class="vol-btn" onclick="va(-10)">-</button>
-<input type="range" id="vol" min="0" max="100" value="80" oninput="vs(this.value)">
-<button class="vol-btn" onclick="va(10)">+</button>
-<span id="vt">80%</span>
-</div>
-</div>
-<div class="card">
-<label>Add to Playlist</label>
-<input type="text" id="yt" placeholder="YouTube URL">
-<input type="text" id="tt" placeholder="Title (optional)">
-<div class="btn-row">
-<button class="ba" onclick="addPl()">Add</button>
-</div>
-<div class="msg" id="msg"></div>
-</div>
-<div class="card">
-<label>Playlist (<span id="pc">0</span>/20)</label>
-<div id="pl"></div>
-<div class="btn-row" style="margin-top:12px">
-<button class="bs" onclick="clearPl()">Clear All</button>
-</div>
-</div>
-<script>
-function addPl(){
- var u=document.getElementById('yt').value;
- if(!u)return;
- var t=document.getElementById('tt').value||u;
- document.getElementById('msg').textContent='Adding...';
- fetch('/playlist/add',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-  body:'url='+encodeURIComponent(u)+'&title='+encodeURIComponent(t)})
- .then(function(r){return r.json()}).then(function(d){
-  document.getElementById('msg').textContent=d.error||'Added!';
-  document.getElementById('yt').value='';
-  document.getElementById('tt').value='';
-  loadPl();fs();
- }).catch(function(){document.getElementById('msg').textContent='Error';});
-}
-function clearPl(){
- fetch('/playlist/clear',{method:'POST'}).then(function(){loadPl();fs();});
-}
-function delPl(i){
- fetch('/playlist/del',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'idx='+i})
- .then(function(){loadPl();fs();});
-}
-function playPl(i){
- fetch('/play',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'idx='+i})
- .then(function(r){return r.json()}).then(function(){loadPl();fs();});
-}
-function nav(d){fetch('/'+d,{method:'POST'}).then(function(r){return r.json()}).then(function(){loadPl();fs();})}
-function st(){fetch('/stop',{method:'POST'}).then(function(r){return r.json()}).then(function(){loadPl();fs();})}
-function vs(v){
- document.getElementById('vt').textContent=v+'%';
- fetch('/volume',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'v='+v});
-}
-function va(d){
- var s=document.getElementById('vol');
- var n=Math.max(0,Math.min(100,parseInt(s.value)+d));
- s.value=n;vs(n);
-}
-function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-function loadPl(){
- fetch('/playlist').then(function(r){return r.json()}).then(function(d){
-  var h='';
-  document.getElementById('pc').textContent=d.count;
-  if(d.count===0){h='<div class="pl-empty">No tracks added</div>';}
-  else{
-   for(var i=0;i<d.count;i++){
-    var ac=i===d.current?' active':'';
-    h+='<div class="pl-item'+ac+'">';
-    h+='<span class="pl-num">'+(i+1)+'</span>';
-    h+='<span class="pl-title" onclick="playPl('+i+')">'+esc(d.titles[i])+'</span>';
-    h+='<button class="pl-del" onclick="delPl('+i+')">x</button>';
-    h+='</div>';
-   }
-  }
-  document.getElementById('pl').innerHTML=h;
- });
-}
-function fs(){
- fetch('/status').then(function(r){return r.json()}).then(function(d){
-  document.getElementById('wip').textContent=d.wifi;
-  document.getElementById('bs').textContent=d.bt;
-  document.getElementById('bd').className='dot '+(d.bt==='connected'?'g':'r');
-  document.getElementById('ss').textContent=d.streaming?'Playing':'Stopped';
-  document.getElementById('np').textContent=d.title||'-';
-  document.getElementById('vol').value=d.volume;
-  document.getElementById('vt').textContent=d.volume+'%';
- }).catch(function(){});
-}
-setInterval(fs,3000);fs();loadPl();
-</script>
-</body>
-</html>
-)rawliteral";
-
 // ===== URL Encoding =====
 String urlEncode(const String& str) {
     String encoded = "";
@@ -439,10 +280,6 @@ void playTrack(int idx) {
 }
 
 // ===== Web Handlers =====
-void handleRoot() {
-    server.send(200, "text/html", INDEX_HTML);
-}
-
 void handlePlaylistAdd() {
     if (!server.hasArg("url")) {
         server.send(400, "application/json", "{\"error\":\"no url\"}");
@@ -622,7 +459,6 @@ void setup() {
     xTaskCreatePinnedToCore(httpStreamTask, "httpStream", 16384, NULL, 2, NULL, 1);
 
     // 웹 서버 엔드포인트 등록
-    server.on("/", HTTP_GET, handleRoot);
     server.on("/play", HTTP_POST, handlePlay);
     server.on("/stop", HTTP_POST, handleStop);
     server.on("/prev", HTTP_POST, handlePrev);

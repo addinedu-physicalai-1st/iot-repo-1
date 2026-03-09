@@ -8,6 +8,11 @@
 
 echo "Voice IoT Controller 서버 종료 중..."
 
+# .env 로드 (RELAY_PORT 확인용)
+if [ -f "$(dirname "$0")/.env" ]; then
+    set -a; source "$(dirname "$0")/.env"; set +a
+fi
+
 # uvicorn / FastAPI (HTTP:8000)
 PIDS_8000=$(lsof -t -i:8000 2>/dev/null)
 if [ -n "$PIDS_8000" ]; then
@@ -24,6 +29,16 @@ if [ -n "$PIDS_9000" ]; then
     echo "  TCP 서버 종료 (port 9000)"
 else
     echo "  TCP 서버 — 실행 중이 아님"
+fi
+
+# YouTube → MP3 중계 서버 (Relay)
+RELAY_PORT="${RELAY_PORT:-8080}"
+PIDS_RELAY=$(lsof -t -i:"$RELAY_PORT" 2>/dev/null)
+if [ -n "$PIDS_RELAY" ]; then
+    kill $PIDS_RELAY 2>/dev/null
+    echo "  Relay 서버 종료 (port $RELAY_PORT)"
+else
+    echo "  Relay 서버 — 실행 중이 아님"
 fi
 
 echo "완료."

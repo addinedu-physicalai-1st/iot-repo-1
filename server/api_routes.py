@@ -669,4 +669,90 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_
 
         return {"status": "ok", "msg": f"'{name}' 삭제 완료 ({count}장)", "name": name}
 
+    # ── BT Speaker 프록시 엔드포인트 ──────────────────────────────
+    import os
+    import httpx
+
+    BT_SPEAKER_URL = os.environ.get("BT_SPEAKER_URL", "")
+
+    async def _bt_proxy_get(path: str, params: dict = None):
+        """ESP32 BT 스피커 GET 프록시"""
+        if not BT_SPEAKER_URL:
+            raise HTTPException(status_code=503, detail="BT_SPEAKER_URL 미설정")
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"{BT_SPEAKER_URL}{path}", params=params)
+                return resp.json()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"ESP32 연결 실패: {e}")
+
+    async def _bt_proxy_post(path: str, data: dict = None):
+        """ESP32 BT 스피커 POST 프록시"""
+        if not BT_SPEAKER_URL:
+            raise HTTPException(status_code=503, detail="BT_SPEAKER_URL 미설정")
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{BT_SPEAKER_URL}{path}",
+                    data=data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                return resp.json()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"ESP32 연결 실패: {e}")
+
+    @router.get("/bt-speaker/status")
+    async def bt_speaker_status(user=Depends(verify_token)):
+        """BT 스피커 상태 조회 (WiFi, BT, 스트리밍, 볼륨)"""
+        return await _bt_proxy_get("/status")
+
+    @router.get("/bt-speaker/playlist")
+    async def bt_speaker_playlist(user=Depends(verify_token)):
+        """BT 스피커 플레이리스트 조회"""
+        return await _bt_proxy_get("/playlist")
+
+    @router.post("/bt-speaker/playlist/add")
+    async def bt_speaker_playlist_add(request: Request, user=Depends(verify_token)):
+        """BT 스피커 플레이리스트에 YouTube URL 추가"""
+        body = await request.form()
+        return await _bt_proxy_post("/playlist/add", data={"url": body.get("url", ""), "title": body.get("title", "")})
+
+    @router.post("/bt-speaker/playlist/del")
+    async def bt_speaker_playlist_del(request: Request, user=Depends(verify_token)):
+        """BT 스피커 플레이리스트에서 트랙 삭제"""
+        body = await request.form()
+        return await _bt_proxy_post("/playlist/del", data={"idx": body.get("idx", "")})
+
+    @router.post("/bt-speaker/playlist/clear")
+    async def bt_speaker_playlist_clear(user=Depends(verify_token)):
+        """BT 스피커 플레이리스트 초기화"""
+        return await _bt_proxy_post("/playlist/clear")
+
+    @router.post("/bt-speaker/play")
+    async def bt_speaker_play(request: Request, user=Depends(verify_token)):
+        """BT 스피커 트랙 재생"""
+        body = await request.form()
+        return await _bt_proxy_post("/play", data={"idx": body.get("idx", "")})
+
+    @router.post("/bt-speaker/stop")
+    async def bt_speaker_stop(user=Depends(verify_token)):
+        """BT 스피커 재생 중지"""
+        return await _bt_proxy_post("/stop")
+
+    @router.post("/bt-speaker/prev")
+    async def bt_speaker_prev(user=Depends(verify_token)):
+        """BT 스피커 이전 트랙"""
+        return await _bt_proxy_post("/prev")
+
+    @router.post("/bt-speaker/next")
+    async def bt_speaker_next(user=Depends(verify_token)):
+        """BT 스피커 다음 트랙"""
+        return await _bt_proxy_post("/next")
+
+    @router.post("/bt-speaker/volume")
+    async def bt_speaker_volume(request: Request, user=Depends(verify_token)):
+        """BT 스피커 볼륨 설정 (0-100)"""
+        body = await request.form()
+        return await _bt_proxy_post("/volume", data={"v": body.get("v", "80")})
+
     return router

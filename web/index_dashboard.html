@@ -726,22 +726,6 @@ header {
 .music-title .track-name  { color:#fff; font-weight:700; display:block; }
 .music-title .track-genre { color:var(--text2); font-size:0.62rem; }
 
-.music-progress-wrap { margin-bottom:8px; }
-.music-progress {
-  width:100%; height:4px;
-  -webkit-appearance:none; appearance:none;
-  background:var(--bg3); border-radius:2px; outline:none; cursor:pointer;
-}
-.music-progress::-webkit-slider-thumb {
-  -webkit-appearance:none;
-  width:12px; height:12px; border-radius:50%;
-  background:var(--purple); cursor:pointer;
-}
-.music-time {
-  display:flex; justify-content:space-between;
-  font-family:var(--font-mono); font-size:0.58rem; color:var(--text2);
-  margin-top:3px;
-}
 .music-controls { display:flex; align-items:center; gap:6px; }
 .music-btn {
   background:var(--bg3); border:1px solid var(--border);
@@ -1770,40 +1754,6 @@ header {
             <span class="ts-val" id="ts-val-living-led">OFF</span>
           </label>
         </div>
-        <!-- 뮤직 플레이어 -->
-        <div class="music-player">
-          <div class="music-track-info">
-            <div class="music-disc" id="musicDisc">🎵</div>
-            <div class="music-title">
-              <span class="track-name" id="trackName">재생 대기 중...</span>
-              <span class="track-genre" id="trackGenre">Lo-fi / Ambient</span>
-            </div>
-            <span style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text2);" id="trackNum">0 / 0</span>
-          </div>
-          <div class="music-progress-wrap">
-            <input class="music-progress" type="range" id="musicProgress" min="0" max="100" value="0"
-              oninput="seekMusic(this.value)">
-            <div class="music-time">
-              <span id="musicCurrent">0:00</span>
-              <span id="musicDuration">0:00</span>
-            </div>
-          </div>
-          <div class="music-controls">
-            <button class="music-btn" onclick="prevTrack()" title="이전 곡">⏮</button>
-            <button class="music-btn play-btn" id="playBtn" onclick="toggleMusic()">
-              ▶ &nbsp;재생
-            </button>
-            <button class="music-btn" onclick="nextTrack()" title="다음 곡">⏭</button>
-          </div>
-          <div class="music-volume">
-            <span class="music-vol-label">🔊 VOL</span>
-            <input class="music-vol-slider" type="range" id="volSlider" min="0" max="100" value="60"
-              oninput="setVolume(this.value)">
-            <span style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text2);width:28px;" id="volVal">60%</span>
-          </div>
-        </div>
-        <!-- YouTube IFrame 플레이어 (숨김) -->
-        <div id="ytPlayerEl" style="visibility:hidden;position:absolute;width:1px;height:1px;"></div>
       </div>
 
       <!-- 침실 -->
@@ -1984,6 +1934,56 @@ header {
           </div>
         </div>
         <div class="cam-last-event" id="camLastEvent">마지막 이벤트: —</div>
+      </div>
+
+      <!-- BT 스피커 -->
+      <div class="device-card" id="card-bt-speaker" style="--card-accent:#FF6B35; margin-top:0;">
+        <div class="device-header">
+          <div class="device-name">BT 스피커</div>
+          <div class="device-badge" id="badge-bt-speaker">OFFLINE</div>
+        </div>
+        <div class="bt-sp-status" style="display:flex;gap:8px;margin-bottom:8px;font-size:0.65rem;font-family:var(--font-mono);">
+          <span>WiFi <span id="btSpWifi" style="color:var(--cyan)">-</span></span>
+          <span>BT <span id="btSpBt" style="color:var(--text2)">-</span></span>
+        </div>
+        <div class="music-player" id="btSpPlayer">
+          <div class="music-track-info">
+            <div class="music-disc" id="btSpDisc">🔊</div>
+            <div class="music-title">
+              <span class="track-name" id="btSpTrackName">대기 중</span>
+              <span class="track-genre" id="btSpTrackGenre">YouTube → BT A2DP</span>
+            </div>
+          </div>
+          <div class="music-controls">
+            <button class="music-btn" onclick="btSpNav('prev')" title="이전 곡">⏮</button>
+            <button class="music-btn play-btn" id="btSpPlayBtn" onclick="btSpStop()" style="flex:1;">
+              ⏹ &nbsp;정지
+            </button>
+            <button class="music-btn" onclick="btSpNav('next')" title="다음 곡">⏭</button>
+          </div>
+          <div class="music-volume">
+            <span class="music-vol-label">🔊 VOL</span>
+            <input class="music-vol-slider" type="range" id="btSpVol" min="0" max="100" value="80"
+              oninput="btSpSetVol(this.value)">
+            <span style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text2);width:28px;" id="btSpVolVal">80%</span>
+          </div>
+        </div>
+        <!-- 플레이리스트 추가 -->
+        <div style="margin-top:8px;">
+          <div style="display:flex;gap:4px;">
+            <input type="text" id="btSpUrl" placeholder="YouTube URL"
+              style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font-size:0.7rem;">
+            <button class="music-btn" onclick="btSpAdd()" style="padding:6px 10px;font-size:0.7rem;">+</button>
+          </div>
+          <input type="text" id="btSpTitle" placeholder="제목 (선택)"
+            style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);font-size:0.7rem;">
+        </div>
+        <!-- 플레이리스트 목록 -->
+        <div id="btSpPlaylist" style="margin-top:8px;max-height:160px;overflow-y:auto;font-size:0.65rem;"></div>
+        <div style="margin-top:6px;display:flex;gap:4px;">
+          <button class="music-btn" onclick="btSpClearPl()" style="flex:1;font-size:0.65rem;padding:4px;">목록 초기화</button>
+        </div>
+        <div id="btSpMsg" style="text-align:center;color:var(--yellow);font-size:0.6rem;margin-top:4px;min-height:14px;"></div>
       </div>
 
   </div><!-- /devices-section -->
@@ -3641,227 +3641,35 @@ function clearLog() {
 }
 
 // ════════════════════════════════════════════
-// 🎵 거실 뮤직 플레이어 (YouTube IFrame API)
+// 🎵 음악 제어 (BT 스피커 프록시)
 // ════════════════════════════════════════════
-const PLAYLIST = [
-  { name: "Lofi Hip Hop Radio",      genre: "Lo-fi / Chill",      vid: "jfKfPfyJRdk" },
-  { name: "Jazz & Bossa Nova",       genre: "Jazz / Bossa Nova",  vid: "neV3EPgvZ3g" },
-  { name: "Chillhop Music",          genre: "Chillhop / Beats",   vid: "5yx6BWlEVcY" },
-  { name: "Smooth Jazz Cafe",        genre: "Smooth Jazz",        vid: "lP4A_X1SQPE" },
-  { name: "Ambient Study Music",     genre: "Ambient / Focus",    vid: "sjkrrmBnpGE" },
-];
-
-let musicIdx    = 0;
-let musicPlaying = false;
-let ytPlayer    = null;
-let ytReady     = false;
-let ytProgressTimer = null;
-
-// YouTube IFrame API 로드
-function loadYouTubeAPI() {
-  if (window.YT && window.YT.Player) {
-    // YT.Player까지 로드된 경우에만 직접 호출
-    onYouTubeIframeAPIReady();
-    return;
-  }
-  const tag = document.createElement('script');
-  tag.src = 'https://www.youtube.com/iframe_api';
-  document.head.appendChild(tag);
-}
-
-window.onYouTubeIframeAPIReady = function() {
-  ytPlayer = new YT.Player('ytPlayerEl', {
-    height: '0', width: '0',
-    videoId: PLAYLIST[musicIdx].vid,
-    playerVars: { autoplay: 0, controls: 0, rel: 0 },
-    events: {
-      onReady:       onYTPlayerReady,
-      onStateChange: onYTStateChange,
-    }
-  });
-};
-
-function onYTPlayerReady(e) {
-  ytReady = true;
-  console.log('[YT] onYTReady fired — player ready');
-  setVolume(document.getElementById('volSlider').value);
-  updateTrackUI();
-  log('🎵 거실 뮤직 플레이어 준비 완료', 'info');
-  // 대기 중인 명령 실행
-  if (_pendingMusicCmd) {
-    const { action, value } = _pendingMusicCmd;
-    _pendingMusicCmd = null;
-    log(`🎵 대기 명령 실행: ${action}`, 'info');
-    setTimeout(() => _execMusicAction(action, value), 500);
-  }
-}
-
-function onYTStateChange(e) {
-  if (e.data === YT.PlayerState.ENDED) {
-    nextTrack();
-  } else if (e.data === YT.PlayerState.PLAYING) {
-    musicPlaying = true;
-    document.getElementById('playBtn').innerHTML  = '⏸ &nbsp;정지';
-    document.getElementById('playBtn').classList.add('playing');
-    document.getElementById('musicDisc').classList.add('playing');
-    houseSetMusic(true);   // 3D 파장 바 시작
-    startProgressTimer();
-    // ── WS 음악 상태 보고 ──────────────────────────────────
-    _reportMusicState('play');
-  } else if (e.data === YT.PlayerState.PAUSED) {
-    musicPlaying = false;
-    document.getElementById('playBtn').innerHTML  = '▶ &nbsp;재생';
-    document.getElementById('playBtn').classList.remove('playing');
-    document.getElementById('musicDisc').classList.remove('playing');
-    houseSetMusic(false);  // 3D 파장 바 정지
-    stopProgressTimer();
-    // ── WS 음악 상태 보고 ──────────────────────────────────
-    _reportMusicState('pause');
-  }
-}
-
-function startProgressTimer() {
-  stopProgressTimer();
-  ytProgressTimer = setInterval(() => {
-    if (!ytPlayer || !ytPlayer.getDuration) return;
-    const cur = ytPlayer.getCurrentTime() || 0;
-    const dur = ytPlayer.getDuration()    || 0;
-    document.getElementById('musicProgress').value   = dur ? (cur / dur) * 100 : 0;
-    document.getElementById('musicCurrent').textContent = fmtTime(cur);
-    document.getElementById('musicDuration').textContent = fmtTime(dur);
-  }, 1000);
-}
-
-function stopProgressTimer() {
-  clearInterval(ytProgressTimer);
-}
-
-function fmtTime(sec) {
-  if (isNaN(sec) || sec < 0) return '0:00';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
-}
-
-function updateTrackUI() {
-  const t = PLAYLIST[musicIdx];
-  document.getElementById('trackName').textContent  = t.name;
-  document.getElementById('trackGenre').textContent = t.genre;
-  document.getElementById('trackNum').textContent   = `${musicIdx+1} / ${PLAYLIST.length}`;
-  document.getElementById('musicProgress').value    = 0;
-  document.getElementById('musicCurrent').textContent  = '0:00';
-  document.getElementById('musicDuration').textContent = '0:00';
-}
-
-function toggleMusic() {
-  if (!ytPlayer || !ytReady) {
-    log('플레이어 초기화 중... 잠시 후 다시 시도하세요', 'warn'); return;
-  }
-  if (musicPlaying) {
-    ytPlayer.pauseVideo();
-    log('⏸ 거실 음악 일시정지', 'info');
-  } else {
-    ytPlayer.playVideo();
-    log(`▶ 거실 음악 재생: ${PLAYLIST[musicIdx].name}`, 'info');
-  }
-}
-
-function prevTrack() {
-  musicIdx = (musicIdx - 1 + PLAYLIST.length) % PLAYLIST.length;
-  updateTrackUI();
-  if (ytPlayer && ytReady) {
-    ytPlayer.loadVideoById(PLAYLIST[musicIdx].vid);
-    if (!musicPlaying) ytPlayer.pauseVideo();
-    log(`⏮ 이전 곡: ${PLAYLIST[musicIdx].name}`, 'info');
-    // ── WS 트랙 변경 보고 ──────────────────────────────────
-    _reportMusicState('track');
-  }
-}
-
-function nextTrack() {
-  musicIdx = (musicIdx + 1) % PLAYLIST.length;
-  updateTrackUI();
-  if (ytPlayer && ytReady) {
-    ytPlayer.loadVideoById(PLAYLIST[musicIdx].vid);
-    if (!musicPlaying) ytPlayer.pauseVideo();
-    log(`⏭ 다음 곡: ${PLAYLIST[musicIdx].name}`, 'info');
-    // ── WS 트랙 변경 보고 ──────────────────────────────────
-    _reportMusicState('track');
-  }
-}
-
-function seekMusic(val) {
-  if (!ytPlayer || !ytReady) return;
-  const dur = ytPlayer.getDuration() || 0;
-  ytPlayer.seekTo((val / 100) * dur, true);
-}
-
-function setVolume(val) {
-  if (ytPlayer && ytReady) ytPlayer.setVolume(parseInt(val));
-  document.getElementById('volVal').textContent = val + '%';
-  // ── WS 볼륨 상태 보고 (디바운스: 연속 조작 시 마지막만 전송) ──
-  clearTimeout(_volumeReportTimer);
-  _volumeReportTimer = setTimeout(() => _reportMusicState('volume'), 500);
-}
-
-// ──────────────────────────────────────────────────────────
-// WS music_state 보고 헬퍼 (v1.6)
-// 브라우저 ytPlayer 이벤트 → 서버 UnifiedStateManager 동기화
-// ──────────────────────────────────────────────────────────
-let _volumeReportTimer = null;
-
-function _reportMusicState(action) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const track = PLAYLIST[musicIdx] || {};
-  const vol   = parseInt(document.getElementById('volSlider')?.value || 60);
-  const msg = {
-    type:    'music_state',
-    action:  action,           // play | pause | stop | volume | track
-    title:   track.name  || '',
-    genre:   track.genre || '',
-    volume:  vol,
-  };
-  ws.send(JSON.stringify(msg));
-}
-
-// WS music_control 메시지 수신 처리
-let _pendingMusicCmd = null;  // 플레이어 미준비 시 대기 명령
-
+// WS music_control 메시지 수신 → BT 스피커로 전달
 function handleMusicControl(action, value) {
-  if (!ytPlayer || !ytReady) {
-    // 준비 안 됐으면 큐에 저장 → onYTReady 후 실행
-    _pendingMusicCmd = { action, value };
-    log('🎵 플레이어 준비 중 — 명령 대기', 'warn');
-    return;
-  }
-  _execMusicAction(action, value);
-}
-
-function _execMusicAction(action, value) {
   switch (action) {
     case 'play':
-      ytPlayer.playVideo();
-      log('▶ 거실 음악 재생 (음성 제어)', 'info');
+      _btSpFetch('/bt-speaker/play', { method: 'POST' });
+      log('▶ BT 스피커 재생 (음성 제어)', 'info');
       break;
     case 'pause':
-      ytPlayer.pauseVideo();
-      log('⏸ 거실 음악 정지 (음성 제어)', 'info');
+    case 'stop':
+      _btSpFetch('/bt-speaker/stop', { method: 'POST' });
+      log('⏹ BT 스피커 정지 (음성 제어)', 'info');
       break;
     case 'next':
-      nextTrack();
-      log('⏭ 다음 곡 (음성 제어)', 'info');
+      btSpNav('next');
+      log('⏭ BT 스피커 다음 곡 (음성 제어)', 'info');
       break;
     case 'prev':
-      prevTrack();
-      log('⏮ 이전 곡 (음성 제어)', 'info');
+      btSpNav('prev');
+      log('⏮ BT 스피커 이전 곡 (음성 제어)', 'info');
       break;
     case 'volume':
       if (value !== undefined) {
         const v = Math.min(100, Math.max(0, parseInt(value)));
-        ytPlayer.setVolume(v);
-        document.getElementById('volSlider').value = v;
-        document.getElementById('volVal').textContent = v + '%';
-        log(`🔊 볼륨 ${v}% (음성 제어)`, 'info');
+        btSpSetVol(v);
+        document.getElementById('btSpVol').value = v;
+        document.getElementById('btSpVolVal').textContent = v + '%';
+        log(`🔊 BT 스피커 볼륨 ${v}% (음성 제어)`, 'info');
       }
       break;
   }
@@ -4388,8 +4196,6 @@ window.onload = async () => {
 
   connectWS();
   loadBrowserMicDevices();
-  updateTrackUI();
-  loadYouTubeAPI();
   drawHouse();  // 3D 하우스 초기 렌더링
 
   // localStorage 백업에서 PIR 모드 즉시 복원 (서버 응답 전 UI 선반영)
@@ -4975,6 +4781,164 @@ async function sgDeleteFace(name) {
 // ════ END FACE REGISTER MODULE ═══════════════
 
 // ════ END CAM MODULE ═══════════════════════════
+
+// ════════════════════════════════════════════
+// 🔊 BT 스피커 컨트롤 (ESP32 → FastAPI 프록시)
+// ════════════════════════════════════════════
+let _btSpPolling = null;
+
+async function _btSpFetch(path, opts = {}) {
+  try {
+    const res = await fetch(path, { ...opts, headers: { ...getAuthHeaders(), ...(opts.headers || {}) } });
+    return await res.json();
+  } catch (e) {
+    console.warn('[BT-SP]', path, e);
+    return null;
+  }
+}
+
+async function btSpFetchStatus() {
+  const d = await _btSpFetch('/bt-speaker/status');
+  const badge = document.getElementById('badge-bt-speaker');
+  if (!d) {
+    badge.textContent = 'OFFLINE'; badge.className = 'device-badge';
+    document.getElementById('btSpWifi').textContent = '-';
+    document.getElementById('btSpBt').textContent = '-';
+    document.getElementById('btSpTrackName').textContent = '연결 안됨';
+    return;
+  }
+  // WiFi / BT status
+  document.getElementById('btSpWifi').textContent = d.wifi || '-';
+  const btConn = d.bt_connected || d.bt || false;
+  document.getElementById('btSpBt').textContent = btConn ? '연결됨' : '끊김';
+  document.getElementById('btSpBt').style.color = btConn ? 'var(--green)' : 'var(--text2)';
+
+  // Badge + 3D 하우스 음악 파장
+  if (d.streaming) {
+    badge.textContent = 'PLAYING'; badge.className = 'device-badge on';
+    document.getElementById('btSpDisc').classList.add('playing');
+    houseSetMusic(true);
+  } else {
+    badge.textContent = btConn ? 'CONNECTED' : 'IDLE'; badge.className = 'device-badge' + (btConn ? ' on' : '');
+    document.getElementById('btSpDisc').classList.remove('playing');
+    houseSetMusic(false);
+  }
+
+  // Track name
+  document.getElementById('btSpTrackName').textContent = d.current_title || d.title || (d.streaming ? '재생 중' : '대기 중');
+
+  // Volume sync (only if user not dragging)
+  if (d.volume !== undefined && document.activeElement?.id !== 'btSpVol') {
+    document.getElementById('btSpVol').value = d.volume;
+    document.getElementById('btSpVolVal').textContent = d.volume + '%';
+  }
+}
+
+async function btSpLoadPl() {
+  const d = await _btSpFetch('/bt-speaker/playlist');
+  const el = document.getElementById('btSpPlaylist');
+  const titles = d?.titles || d?.playlist || [];
+  if (!d || titles.length === 0) {
+    el.innerHTML = '<div style="color:var(--text2);text-align:center;padding:8px;">플레이리스트 비어 있음</div>';
+    return;
+  }
+  el.innerHTML = titles.map((t, i) => {
+    const active = (d.current !== undefined && d.current === i) ? 'color:var(--cyan);font-weight:bold;' : '';
+    const title = (typeof t === 'string') ? t : (t.title || t.url || `트랙 ${i + 1}`);
+    return `<div style="display:flex;align-items:center;gap:4px;padding:3px 0;border-bottom:1px solid var(--border);${active}">
+      <span style="cursor:pointer;flex:1;" onclick="btSpPlay(${i})" title="재생">${i + 1}. ${title}</span>
+      <button class="music-btn" onclick="btSpDelPl(${i})" style="padding:2px 6px;font-size:0.55rem;" title="삭제">✕</button>
+    </div>`;
+  }).join('');
+}
+
+async function btSpNav(dir) {
+  const path = dir === 'prev' ? '/bt-speaker/prev' : '/bt-speaker/next';
+  _btSpMsg('');
+  const d = await _btSpFetch(path, { method: 'POST' });
+  if (d) { log(`🔊 BT 스피커 ${dir === 'prev' ? '이전' : '다음'} 곡`, 'info'); }
+  setTimeout(btSpFetchStatus, 500);
+  setTimeout(btSpLoadPl, 500);
+}
+
+async function btSpStop() {
+  _btSpMsg('');
+  await _btSpFetch('/bt-speaker/stop', { method: 'POST' });
+  log('🔊 BT 스피커 정지', 'info');
+  setTimeout(btSpFetchStatus, 500);
+}
+
+async function btSpPlay(idx) {
+  _btSpMsg('');
+  const body = new URLSearchParams(); body.append('idx', idx);
+  await _btSpFetch('/bt-speaker/play', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+  log(`🔊 BT 스피커 재생: 트랙 ${idx + 1}`, 'info');
+  setTimeout(btSpFetchStatus, 500);
+  setTimeout(btSpLoadPl, 500);
+}
+
+let _btSpVolTimer = null;
+function btSpSetVol(val) {
+  document.getElementById('btSpVolVal').textContent = val + '%';
+  clearTimeout(_btSpVolTimer);
+  _btSpVolTimer = setTimeout(async () => {
+    const body = new URLSearchParams(); body.append('v', val);
+    await _btSpFetch('/bt-speaker/volume', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+  }, 300);
+}
+
+async function btSpAdd() {
+  const urlEl = document.getElementById('btSpUrl');
+  const titleEl = document.getElementById('btSpTitle');
+  const url = urlEl.value.trim();
+  if (!url) { _btSpMsg('URL을 입력하세요'); return; }
+  _btSpMsg('추가 중...');
+  const body = new URLSearchParams();
+  body.append('url', url);
+  if (titleEl.value.trim()) body.append('title', titleEl.value.trim());
+  const d = await _btSpFetch('/bt-speaker/playlist/add', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+  if (d && !d.error) {
+    _btSpMsg('추가 완료');
+    urlEl.value = ''; titleEl.value = '';
+    log(`🔊 BT 스피커 플레이리스트 추가: ${url}`, 'info');
+    btSpLoadPl();
+  } else {
+    _btSpMsg(d?.error || '추가 실패');
+  }
+}
+
+async function btSpDelPl(idx) {
+  const body = new URLSearchParams(); body.append('idx', idx);
+  await _btSpFetch('/bt-speaker/playlist/del', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+  btSpLoadPl();
+}
+
+async function btSpClearPl() {
+  await _btSpFetch('/bt-speaker/playlist/clear', { method: 'POST' });
+  log('🔊 BT 스피커 플레이리스트 초기화', 'info');
+  btSpLoadPl();
+}
+
+function _btSpMsg(msg) {
+  document.getElementById('btSpMsg').textContent = msg;
+  if (msg) setTimeout(() => { const el = document.getElementById('btSpMsg'); if (el.textContent === msg) el.textContent = ''; }, 4000);
+}
+
+// 폴링 시작/정지
+function btSpStartPolling() {
+  btSpFetchStatus();
+  btSpLoadPl();
+  _btSpPolling = setInterval(btSpFetchStatus, 5000);
+}
+
+function btSpStopPolling() {
+  clearInterval(_btSpPolling);
+}
+
+// 페이지 로드 시 BT 스피커 폴링 시작
+document.addEventListener('DOMContentLoaded', () => { setTimeout(btSpStartPolling, 2000); });
+
+// ════ END BT SPEAKER MODULE ═══════════════════
 </script>
 
 <div class="toast-container" id="toastContainer"></div>
