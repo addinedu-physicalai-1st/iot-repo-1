@@ -69,8 +69,11 @@ iot-repo-1/
 │   │   └── esp32_cam.ino
 │   ├── esp32_home1_hmac/            # 홈 컨트롤러 #1 (침실서보/욕실seg7·DHT11)
 │   │   └── esp32_home1_hmac.ino
-│   └── esp32_home2_hmac/            # 홈 컨트롤러 #2 (LED5개/차고·현관서보/PIR)
-│       └── esp32_home2_hmac.ino
+│   ├── esp32_home2_hmac/            # 홈 컨트롤러 #2 (LED5개/차고·현관서보/PIR)
+│   │   └── esp32_home2_hmac.ino
+│   └── esp32_bt_speaker/            # BT 스피커 음악 스트리밍 (ESP32-WROVER)
+│       ├── esp32_bt_speaker.ino
+│       └── config.h                 # WiFi/BT/중계서버 설정 (Git 미포함)
 ├── gui/
 │   └── dashboard.py                 # PyQt6 대시보드
 ├── config/
@@ -92,7 +95,10 @@ iot-repo-1/
 │   ├── token_test.sh                # JWT 토큰 테스트
 │   ├── download_models.sh           # 모델 파일 다운로드
 │   ├── ssl_generate_cert.sh         # HTTPS 자체 서명 인증서 생성
-│   └── run_nginx.sh                 # nginx 역방향 프록시 실행
+│   ├── run_nginx.sh                 # nginx 역방향 프록시 실행
+│   ├── relay_server.py              # YouTube → MP3 중계 서버 (BT Speaker용)
+│   ├── start_relay.sh               # 중계 서버 시작
+│   └── stop_relay.sh                # 중계 서버 중지
 ├── nginx/
 │   ├── nginx.conf                   # HTTPS 역방향 프록시 설정
 │   ├── ssl/                         # 인증서 (Git 미포함)
@@ -166,6 +172,8 @@ nano .env
 | `ESP32_SECRET` | TCP HMAC 서명 공유 키 | `my-secret-key` |
 | `SMARTGATE_SEQUENCE` | SmartGate 제스처 인증 시퀀스 | `1,0,3` |
 | `CAM_ALLOWED_IPS` | UDP 카메라 허용 IP 목록 (쉼표 구분, settings.yaml 오버라이드) | `192.168.0.19,192.168.0.20` |
+| `RELAY_PORT` | YouTube 중계 서버 포트 | `8080` |
+| `RELAY_ALLOWED_IPS` | 중계 서버 접근 허용 IP (ESP32 WiFi IP, 쉼표 구분) | `192.168.0.xx` |
 
 > `.env`는 `.gitignore`에 포함되어 Git에 커밋되지 않습니다.
 
@@ -303,6 +311,7 @@ Authorization: Bearer <token>
 | `esp32_home1` | 홈 컨트롤러 #1 | 침실 서보(커튼), 욕실 7세그먼트, DHT11 |
 | `esp32_home2` | 홈 컨트롤러 #2 | LED 5개, 차고·현관 서보, PIR 센서 |
 | `esp32_cam`   | 현관 카메라 | MJPEG UDP 스트리밍 (SmartGate) |
+| `esp32_bt_speaker` | BT 스피커 (ESP32-WROVER) | WiFi + BT A2DP 음악 스트리밍 |
 
 ### TCP 포트
 
@@ -311,6 +320,68 @@ Authorization: Bearer <token>
 | 8000 | FastAPI (HTTP + WebSocket) |
 | 9000 | ESP32 TCP 서버 |
 | 5005 | ESP32-CAM UDP MJPEG 스트림 |
+| 8080 | YouTube → MP3 중계 서버 (BT Speaker) |
+
+---
+
+## BT 스피커 음악 스트리밍 (ESP32-WROVER)
+
+ESP32-WROVER(CH-340)가 WiFi + Bluetooth A2DP로 PLEIGO BS15 스피커에 YouTube 음악을 스트리밍합니다.
+
+### 아키텍처
+
+```
+[웹 브라우저] → HTTP → [ESP32-WROVER :80] → HTTP → [PC 중계서버 :8080]
+                              │                           │
+                        BT A2DP Source              yt-dlp + ffmpeg
+                              │                     (YouTube → MP3)
+                       [BT 스피커]
+```
+
+### 하드웨어
+
+- ESP32-WROVER (CH-340 USB, PSRAM 탑재)
+- PLEIGO BS15 (Bluetooth 5.3 스피커)
+
+### 아두이노 IDE 설정
+
+| 항목 | 설정 |
+|------|------|
+| 보드 | `ESP32 Wrover Kit` |
+| Partition Scheme | `Huge APP (3MB No OTA/1MB SPIFFS)` |
+| PSRAM | `Enabled` |
+| Upload Speed | `921600` |
+
+### 필요 라이브러리
+
+- [ESP32-A2DP](https://github.com/pschatzmann/ESP32-A2DP) — Sketch → Include Library → Add .ZIP Library
+- [arduino-libhelix](https://github.com/pschatzmann/arduino-libhelix) — 동일 방법
+
+### ESP32 펌웨어 설정
+
+```bash
+cd esp32/esp32_bt_speaker
+nano config.h  # WiFi SSID/PW, BT 스피커 이름, 중계서버 IP 설정
+```
+
+### 중계 서버 실행
+
+```bash
+# 최초 1회: venv 생성 및 패키지 설치
+python3 -m venv .relay-venv
+.relay-venv/bin/pip install flask yt-dlp
+
+# .env에 RELAY_PORT, RELAY_ALLOWED_IPS 설정 후 실행
+./scripts/start_relay.sh   # 시작
+./scripts/stop_relay.sh    # 중지
+```
+
+### 사용
+
+1. ESP32에 펌웨어 업로드 후 시리얼 모니터에서 IP 확인
+2. PC에서 중계 서버 실행
+3. 브라우저에서 `http://<ESP32_IP>` 접속
+4. YouTube URL 추가 후 재생 → BT 스피커에서 음악 출력
 
 ---
 

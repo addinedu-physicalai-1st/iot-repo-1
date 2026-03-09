@@ -202,6 +202,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Relay server
+.relay-venv/
+
 # ESP32 민감정보 (WiFi/서버 IP)
 esp32/config.h
 esp32/*/config.h
