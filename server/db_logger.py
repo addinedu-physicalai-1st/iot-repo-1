@@ -408,7 +408,10 @@ class DBLogger:
             params.append(date_from)
         if date_to:
             conditions.append("created_at <= %s")
-            params.append(date_to)
+            if len(date_to) == 10:  # "YYYY-MM-DD" → 하루 끝까지 포함
+                params.append(date_to + " 23:59:59")
+            else:
+                params.append(date_to)
         if category:
             conditions.append("event_category = %s")
             params.append(category)
@@ -457,7 +460,10 @@ class DBLogger:
             params.append(date_from)
         if date_to:
             conditions.append("created_at <= %s")
-            params.append(date_to)
+            if len(date_to) == 10:  # "YYYY-MM-DD" → 하루 끝까지 포함
+                params.append(date_to + " 23:59:59")
+            else:
+                params.append(date_to)
         if category:
             conditions.append("event_category = %s")
             params.append(category)
@@ -504,7 +510,10 @@ class DBLogger:
             params.append(date_from)
         if date_to:
             conditions.append("created_at <= %s")
-            params.append(date_to)
+            if len(date_to) == 10:  # "YYYY-MM-DD" → 하루 끝까지 포함
+                params.append(date_to + " 23:59:59")
+            else:
+                params.append(date_to)
         if device_id:
             conditions.append("device_id = %s")
             params.append(device_id)
@@ -544,7 +553,10 @@ class DBLogger:
             params.append(date_from)
         if date_to:
             conditions.append("created_at <= %s")
-            params.append(date_to)
+            if len(date_to) == 10:  # "YYYY-MM-DD" → 하루 끝까지 포함
+                params.append(date_to + " 23:59:59")
+            else:
+                params.append(date_to)
         if category:
             conditions.append("event_category = %s")
             params.append(category)
@@ -584,7 +596,10 @@ class DBLogger:
             params.append(date_from)
         if date_to:
             conditions.append("created_at <= %s")
-            params.append(date_to)
+            if len(date_to) == 10:  # "YYYY-MM-DD" → 하루 끝까지 포함
+                params.append(date_to + " 23:59:59")
+            else:
+                params.append(date_to)
 
         where = "WHERE " + " AND ".join(conditions) if conditions else ""
         sql = (
@@ -662,7 +677,10 @@ class DBLogger:
             params.append(date_from)
         if date_to:
             conditions.append("created_at <= %s")
-            params.append(date_to)
+            if len(date_to) == 10:  # "YYYY-MM-DD" → 하루 끝까지 포함
+                params.append(date_to + " 23:59:59")
+            else:
+                params.append(date_to)
         if device_id:
             conditions.append("device_id = %s")
             params.append(device_id)
