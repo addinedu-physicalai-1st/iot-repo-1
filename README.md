@@ -251,7 +251,7 @@ DISABLE_STT=1 DISABLE_TTS=1 ./run_server.sh
 
 - **HOUSE MAP** — 3D 홈 평면도, 디바이스 상태 실시간 표시
 - **SENSOR PANEL** — DHT22 온도/습도, PIR 보안 상태
-- **BT 스피커** — YouTube 음악 스트리밍 제어 (재생/정지/이전/다음, 볼륨, 플레이리스트 관리)
+- **BT 스피커** — YouTube 음악 스트리밍 제어 (재생/정지 토글, 이전/다음, 볼륨, 플레이리스트, BT 수동 연결/해제)
 - **COMMAND LOG** — 명령 실행 이력
 - **DB EVENT LOG** — MySQL 이벤트 로그 검색/조회 + 패턴 분석
 
@@ -308,6 +308,8 @@ Authorization: Bearer <token>
 | POST | `/bt-speaker/prev` | 이전 트랙 |
 | POST | `/bt-speaker/next` | 다음 트랙 |
 | POST | `/bt-speaker/volume` | 볼륨 설정 (`v`: 0-100) |
+| POST | `/bt-speaker/bt-connect` | BT 스피커 블루투스 수동 연결 |
+| POST | `/bt-speaker/bt-disconnect` | BT 스피커 블루투스 수동 해제 |
 
 ### SmartGate API
 
@@ -410,7 +412,7 @@ python3 -m venv .relay-venv
 | # | 우선순위 | 항목 | 구현 방법 | 상태 |
 |---|----------|------|-----------|------|
 | 1 | HIGH | TCP :9000 통신 암호화 | HMAC-SHA256 서명 (`esp32_secure.py`) | ✅ 완료 |
-| 2 | HIGH | FastAPI 엔드포인트 인증 | JWT Bearer 토큰 전체 21개 엔드포인트 적용 (`auth.py`) | ✅ 완료 |
+| 2 | HIGH | FastAPI 엔드포인트 인증 | JWT Bearer 토큰 전체 34개 엔드포인트 적용 (`auth.py`) | ✅ 완료 |
 | 3 | HIGH | 얼굴 임베딩 벡터 암호화 | Fernet 대칭 암호화 (`face_store.py`) | ✅ 코드 완료 / 통합 테스트 필요 |
 | 4 | MEDIUM | ESP32 OTA 서명 검증 | ESP-IDF Secure Boot v2 | ⛔ 제외 (ESP-IDF 별도) |
 | 5 | MEDIUM | UDP MJPEG 스트림 IP 필터링 | IP 화이트리스트 (`camera_stream.py` v2.2) | ✅ 완료 |
@@ -519,4 +521,4 @@ curl "http://localhost:8000/logs/pattern/anomalies?threshold=2.0" \
 
 ---
 
-*iot-repo-1 · Voice IoT Controller · Stephen · 2026-03-09*
+*iot-repo-1 · Voice IoT Controller · Stephen · 2026-03-10*

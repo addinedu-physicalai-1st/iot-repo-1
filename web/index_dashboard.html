@@ -1942,9 +1942,10 @@ header {
           <div class="device-name">BT 스피커</div>
           <div class="device-badge" id="badge-bt-speaker">OFFLINE</div>
         </div>
-        <div class="bt-sp-status" style="display:flex;gap:8px;margin-bottom:8px;font-size:0.65rem;font-family:var(--font-mono);">
+        <div class="bt-sp-status" style="display:flex;gap:8px;margin-bottom:8px;font-size:0.65rem;font-family:var(--font-mono);align-items:center;">
           <span>WiFi <span id="btSpWifi" style="color:var(--cyan)">-</span></span>
           <span>BT <span id="btSpBt" style="color:var(--text2)">-</span></span>
+          <button class="music-btn" id="btSpBtToggle" onclick="btSpBtToggle()" style="margin-left:auto;padding:2px 8px;font-size:0.6rem;">BT 연결</button>
         </div>
         <div class="music-player" id="btSpPlayer">
           <div class="music-track-info">
@@ -1956,8 +1957,8 @@ header {
           </div>
           <div class="music-controls">
             <button class="music-btn" onclick="btSpNav('prev')" title="이전 곡">⏮</button>
-            <button class="music-btn play-btn" id="btSpPlayBtn" onclick="btSpStop()" style="flex:1;">
-              ⏹ &nbsp;정지
+            <button class="music-btn play-btn" id="btSpPlayBtn" onclick="btSpTogglePlay()" style="flex:1;">
+              ▶ &nbsp;재생
             </button>
             <button class="music-btn" onclick="btSpNav('next')" title="다음 곡">⏭</button>
           </div>
@@ -4790,6 +4791,7 @@ let _btSpPolling = null;
 async function _btSpFetch(path, opts = {}) {
   try {
     const res = await fetch(path, { ...opts, headers: { ...getAuthHeaders(), ...(opts.headers || {}) } });
+    if (!res.ok) { console.warn('[BT-SP]', path, res.status, res.statusText); return null; }
     return await res.json();
   } catch (e) {
     console.warn('[BT-SP]', path, e);
@@ -4809,18 +4811,23 @@ async function btSpFetchStatus() {
   }
   // WiFi / BT status
   document.getElementById('btSpWifi').textContent = d.wifi || '-';
-  const btConn = d.bt_connected || d.bt || false;
+  const btConn = d.bt_connected === true || d.bt === "connected";
   document.getElementById('btSpBt').textContent = btConn ? '연결됨' : '끊김';
   document.getElementById('btSpBt').style.color = btConn ? 'var(--green)' : 'var(--text2)';
+  const toggleBtn = document.getElementById('btSpBtToggle');
+  if (!toggleBtn.disabled) { toggleBtn.textContent = btConn ? 'BT 해제' : 'BT 연결'; }
 
-  // Badge + 3D 하우스 음악 파장
+  // Badge + 3D 하우스 음악 파장 + 재생/정지 버튼 동기화
+  const playBtn = document.getElementById('btSpPlayBtn');
   if (d.streaming) {
     badge.textContent = 'PLAYING'; badge.className = 'device-badge on';
     document.getElementById('btSpDisc').classList.add('playing');
+    playBtn.innerHTML = '⏹ &nbsp;정지';
     houseSetMusic(true);
   } else {
     badge.textContent = btConn ? 'CONNECTED' : 'IDLE'; badge.className = 'device-badge' + (btConn ? ' on' : '');
     document.getElementById('btSpDisc').classList.remove('playing');
+    playBtn.innerHTML = '▶ &nbsp;재생';
     houseSetMusic(false);
   }
 
@@ -4859,6 +4866,19 @@ async function btSpNav(dir) {
   if (d) { log(`🔊 BT 스피커 ${dir === 'prev' ? '이전' : '다음'} 곡`, 'info'); }
   setTimeout(btSpFetchStatus, 500);
   setTimeout(btSpLoadPl, 500);
+}
+
+async function btSpTogglePlay() {
+  const btn = document.getElementById('btSpPlayBtn');
+  const isPlaying = btn.textContent.includes('정지');
+  if (isPlaying) {
+    await btSpStop();
+  } else {
+    // 현재 트랙이 있으면 이어서 재생, 없으면 첫 트랙 재생
+    const st = await _btSpFetch('/bt-speaker/status');
+    const idx = (st && st.track >= 0) ? st.track : 0;
+    await btSpPlay(idx);
+  }
 }
 
 async function btSpStop() {
@@ -4901,7 +4921,7 @@ async function btSpAdd() {
     _btSpMsg('추가 완료');
     urlEl.value = ''; titleEl.value = '';
     log(`🔊 BT 스피커 플레이리스트 추가: ${url}`, 'info');
-    btSpLoadPl();
+    setTimeout(btSpLoadPl, 300);
   } else {
     _btSpMsg(d?.error || '추가 실패');
   }
@@ -4924,11 +4944,26 @@ function _btSpMsg(msg) {
   if (msg) setTimeout(() => { const el = document.getElementById('btSpMsg'); if (el.textContent === msg) el.textContent = ''; }, 4000);
 }
 
+// BT 수동 연결/해제 토글
+async function btSpBtToggle() {
+  const btn = document.getElementById('btSpBtToggle');
+  const btEl = document.getElementById('btSpBt');
+  const isConnected = btEl.textContent === '연결됨';
+  btn.disabled = true;
+  btn.textContent = isConnected ? '해제 중...' : '연결 중...';
+  const path = isConnected ? '/bt-speaker/bt-disconnect' : '/bt-speaker/bt-connect';
+  const d = await _btSpFetch(path, { method: 'POST' });
+  if (d) { log(`🔊 BT 스피커 ${isConnected ? '블루투스 해제' : '블루투스 연결'} 요청`, 'info'); }
+  else { _btSpMsg('BT 명령 실패'); }
+  btn.disabled = false;
+  setTimeout(btSpFetchStatus, 1500);
+}
+
 // 폴링 시작/정지
 function btSpStartPolling() {
   btSpFetchStatus();
   btSpLoadPl();
-  _btSpPolling = setInterval(btSpFetchStatus, 5000);
+  _btSpPolling = setInterval(() => { btSpFetchStatus(); btSpLoadPl(); }, 5000);
 }
 
 function btSpStopPolling() {

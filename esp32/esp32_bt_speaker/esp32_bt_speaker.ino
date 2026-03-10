@@ -391,6 +391,29 @@ void handleVolume() {
     server.send(200, "application/json", "{\"volume\":" + String(volumePercent) + "}");
 }
 
+void handleBtConnect() {
+    if (a2dpSource.is_connected()) {
+        server.send(200, "application/json", "{\"bt\":\"already_connected\"}");
+        return;
+    }
+    a2dpSource.set_auto_reconnect(true);
+    a2dpSource.start(BT_SPEAKER_NAME, a2dp_callback);
+    Serial.println("[BT] Manual connect requested");
+    server.send(200, "application/json", "{\"bt\":\"connecting\"}");
+}
+
+void handleBtDisconnect() {
+    if (!a2dpSource.is_connected()) {
+        server.send(200, "application/json", "{\"bt\":\"already_disconnected\"}");
+        return;
+    }
+    streaming = false;
+    a2dpSource.set_auto_reconnect(false);
+    a2dpSource.disconnect();
+    Serial.println("[BT] Manual disconnect requested");
+    server.send(200, "application/json", "{\"bt\":\"disconnected\"}");
+}
+
 void handleStatus() {
     bool btConn = a2dpSource.is_connected();
     String t = currentTitle;
@@ -469,6 +492,8 @@ void setup() {
     server.on("/playlist/add", HTTP_POST, handlePlaylistAdd);
     server.on("/playlist/del", HTTP_POST, handlePlaylistDel);
     server.on("/playlist/clear", HTTP_POST, handlePlaylistClear);
+    server.on("/bt-connect", HTTP_POST, handleBtConnect);
+    server.on("/bt-disconnect", HTTP_POST, handleBtDisconnect);
     server.begin();
 
     Serial.println("[Web] Server: http://" + WiFi.localIP().toString());

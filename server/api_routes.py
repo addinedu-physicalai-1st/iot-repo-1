@@ -755,4 +755,14 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_
         body = await request.form()
         return await _bt_proxy_post("/volume", data={"v": body.get("v", "80")})
 
+    @router.post("/bt-speaker/bt-connect")
+    async def bt_speaker_bt_connect(user=Depends(verify_token)):
+        """BT 스피커 블루투스 수동 연결"""
+        return await _bt_proxy_post("/bt-connect")
+
+    @router.post("/bt-speaker/bt-disconnect")
+    async def bt_speaker_bt_disconnect(user=Depends(verify_token)):
+        """BT 스피커 블루투스 수동 해제"""
+        return await _bt_proxy_post("/bt-disconnect")
+
     return router

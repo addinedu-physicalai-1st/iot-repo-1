@@ -6,11 +6,23 @@
 #   ./kill_server.sh          # 서버 프로세스 종료
 # ================================================================
 
+# 프로젝트 루트로 이동 (run_server.sh와 동일 패턴)
+cd "$(dirname "$0")"
+
 echo "Voice IoT Controller 서버 종료 중..."
 
 # .env 로드 (RELAY_PORT 확인용)
-if [ -f "$(dirname "$0")/.env" ]; then
-    set -a; source "$(dirname "$0")/.env"; set +a
+if [ -f ".env" ]; then
+    set -a; source .env; set +a
+fi
+
+# nginx (HTTPS 역방향 프록시)
+if command -v nginx &>/dev/null && nginx -s stop 2>/dev/null; then
+    echo "  nginx 종료"
+elif [ -f "scripts/run_nginx.sh" ]; then
+    ./scripts/run_nginx.sh stop 2>/dev/null && echo "  nginx 종료" || echo "  nginx — 실행 중이 아님"
+else
+    echo "  nginx — 실행 중이 아님"
 fi
 
 # uvicorn / FastAPI (HTTP:8000)
