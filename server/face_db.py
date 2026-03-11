@@ -1,6 +1,12 @@
 """
 face_db.py — 등록 얼굴 DB 관리 REST API 라우터
-v1.0 | Voice IoT Controller
+v1.1 | Voice IoT Controller
+
+변경 이력:
+  v1.0: 최초 작성
+  v1.1: HIGH-3 — ENCODINGS_CACHE enc 경로로 변경
+        - ENCODINGS_CACHE: encodings.pkl → encodings.enc
+        - rebuild 엔드포인트: enc + pkl 둘 다 삭제 후 재빌드
 
 엔드포인트:
   GET    /face-db/list              등록 인물 목록
@@ -20,9 +26,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/face-db", tags=["FaceDB"])
 
-FACE_DB_DIR     = Path("face_db/known")
-ENCODINGS_CACHE = Path("face_db/encodings.pkl")
-ALLOWED_EXT     = {".jpg", ".jpeg", ".png"}
+FACE_DB_DIR      = Path("face_db/known")
+ENCODINGS_CACHE  = Path("face_db/encodings.enc")   # HIGH-3: 암호화 캐시 경로
+ENCODINGS_LEGACY = Path("face_db/encodings.pkl")   # HIGH-3: 레거시 평문 경로
+ALLOWED_EXT      = {".jpg", ".jpeg", ".png"}
 
 # FrameAnalyzer 싱글턴 참조 (main.py에서 주입)
 _analyzer = None
@@ -78,9 +85,8 @@ async def register_face(
         ext = Path(upload.filename).suffix.lower()
         if ext not in ALLOWED_EXT:
             continue
-        # 기존 파일 수 기반 순번 부여
-        existing = list(person_dir.glob("*"))
-        idx      = len(existing) + 1
+        existing  = list(person_dir.glob("*"))
+        idx       = len(existing) + 1
         save_path = person_dir / f"{name}_{idx:03d}{ext}"
         content   = await upload.read()
         save_path.write_bytes(content)
@@ -132,10 +138,16 @@ async def delete_face(name: str):
 @router.post("/rebuild")
 async def rebuild_db():
     """
-    face_db/known/ 폴더 기반 인코딩 캐시 강제 재생성
+    face_db/known/ 폴더 기반 인코딩 캐시 강제 재생성.
+    HIGH-3: enc + pkl 둘 다 삭제 후 재빌드 (암호화 캐시로 재생성).
     """
     if _analyzer is None:
         raise HTTPException(status_code=503, detail="FrameAnalyzer 미초기화")
+
+    # HIGH-3: 기존 캐시 (enc + pkl) 모두 삭제 후 재빌드
+    ENCODINGS_CACHE.unlink(missing_ok=True)
+    ENCODINGS_LEGACY.unlink(missing_ok=True)
+    logger.info("[FaceDB] 캐시 삭제 (enc + pkl) → 재빌드 시작")
 
     _analyzer.rebuild_face_db()
     count = len(_analyzer._known_db)
