@@ -67,6 +67,7 @@ v1.5 변경사항:
 
 from __future__ import annotations
 
+import asyncio
 import json as _json
 import logging
 from pathlib import Path
@@ -1048,11 +1049,27 @@ class CommandRouter:
             return ws_cmd_result("warn", "Ollama가 실행되지 않았습니다. ollama serve 후 다시 시도해 주세요.")
 
         logger.info(f"[Router] LLM 파싱 요청: {text}")
-        data = await self._llm.parse(text)
+        try:
+            data = await asyncio.wait_for(self._llm.parse(text), timeout=8.0)
+        except asyncio.TimeoutError:
+            logger.error(f"[Router] LLM 파싱 타임아웃 (8초): '{text}'")
+            return _json.dumps({
+                "type": "cmd_result",
+                "status": "timeout",
+                "msg": "응답 시간이 초과되었습니다.",
+                "tts_response": "처리 시간이 너무 오래 걸렸어요. 다시 말씀해주시겠어요?",
+                "original_text": text,
+            }, ensure_ascii=False)
 
         if not data:
             logger.warning(f"[Router] 명령 파싱 실패: '{text}'")
-            return ws_cmd_result("unknown", f"명령을 이해하지 못했습니다: '{text}'")
+            return _json.dumps({
+                "type": "cmd_result",
+                "status": "unknown",
+                "msg": f"명령을 이해하지 못했습니다: '{text}'",
+                "tts_response": "잘 알아듣지 못했어요. 다시 말씀해주시겠어요?",
+                "original_text": text,
+            }, ensure_ascii=False)
 
         logger.info(f"[Router] 음성 명령 파싱: '{text}' → cmd={data.get('cmd')} action={data.get('action')}")
 

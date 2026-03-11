@@ -53,14 +53,38 @@ source .env
 set +a
 echo ".env 환경변수 로드 완료"
 
+# 포트 종료 함수: SIGTERM → 대기 → SIGKILL (kill_server.sh 동일 로직)
+kill_port() {
+    local port=$1
+    local label=$2
+    local pids
+    pids=$(lsof -t -i:"$port" 2>/dev/null || true)
+    if [ -z "$pids" ]; then
+        return
+    fi
+    kill $pids 2>/dev/null || true
+    for _ in $(seq 1 10); do
+        if ! lsof -t -i:"$port" &>/dev/null; then
+            echo "  $label 종료 완료 (port $port)"
+            return
+        fi
+        sleep 0.5
+    done
+    pids=$(lsof -t -i:"$port" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        kill -9 $pids 2>/dev/null || true
+        sleep 1
+        echo "  $label 강제 종료 (port $port)"
+    fi
+}
+
 # 기존 프로세스 정리 (포트 충돌 방지)
 echo "기존 프로세스 정리 중..."
 ./scripts/run_nginx.sh stop 2>/dev/null || true
-kill $(lsof -t -i:9000) 2>/dev/null || true
-kill $(lsof -t -i:8000) 2>/dev/null || true
 RELAY_PORT="${RELAY_PORT:-8080}"
-kill $(lsof -t -i:"$RELAY_PORT") 2>/dev/null || true
-sleep 1
+kill_port 9000 "TCP 서버"
+kill_port 8000 "HTTP/WS 서버"
+kill_port "$RELAY_PORT" "Relay 서버"
 
 # nginx 종료 트랩 (스크립트 종료 시 자동 실행)
 NGINX_STARTED=0

@@ -16,6 +16,35 @@ if [ -f ".env" ]; then
     set -a; source .env; set +a
 fi
 
+# 포트 종료 함수: SIGTERM → 대기 → SIGKILL → 포트 해제 확인
+kill_port() {
+    local port=$1
+    local label=$2
+    local pids
+    pids=$(lsof -t -i:"$port" 2>/dev/null)
+    if [ -z "$pids" ]; then
+        echo "  $label — 실행 중이 아님"
+        return
+    fi
+    # SIGTERM
+    kill $pids 2>/dev/null
+    # 최대 5초 대기
+    for _ in $(seq 1 10); do
+        if ! lsof -t -i:"$port" &>/dev/null; then
+            echo "  $label 종료 완료 (port $port)"
+            return
+        fi
+        sleep 0.5
+    done
+    # SIGKILL
+    pids=$(lsof -t -i:"$port" 2>/dev/null)
+    if [ -n "$pids" ]; then
+        kill -9 $pids 2>/dev/null
+        sleep 1
+        echo "  $label 강제 종료 (port $port)"
+    fi
+}
+
 # nginx (HTTPS 역방향 프록시)
 if command -v nginx &>/dev/null && nginx -s stop 2>/dev/null; then
     echo "  nginx 종료"
@@ -25,32 +54,10 @@ else
     echo "  nginx — 실행 중이 아님"
 fi
 
-# uvicorn / FastAPI (HTTP:8000)
-PIDS_8000=$(lsof -t -i:8000 2>/dev/null)
-if [ -n "$PIDS_8000" ]; then
-    kill $PIDS_8000 2>/dev/null
-    echo "  HTTP/WS 서버 종료 (port 8000)"
-else
-    echo "  HTTP/WS 서버 — 실행 중이 아님"
-fi
+kill_port 8000 "HTTP/WS 서버"
+kill_port 9000 "TCP 서버"
 
-# TCP 서버 (TCP:9000)
-PIDS_9000=$(lsof -t -i:9000 2>/dev/null)
-if [ -n "$PIDS_9000" ]; then
-    kill $PIDS_9000 2>/dev/null
-    echo "  TCP 서버 종료 (port 9000)"
-else
-    echo "  TCP 서버 — 실행 중이 아님"
-fi
-
-# YouTube → MP3 중계 서버 (Relay)
 RELAY_PORT="${RELAY_PORT:-8080}"
-PIDS_RELAY=$(lsof -t -i:"$RELAY_PORT" 2>/dev/null)
-if [ -n "$PIDS_RELAY" ]; then
-    kill $PIDS_RELAY 2>/dev/null
-    echo "  Relay 서버 종료 (port $RELAY_PORT)"
-else
-    echo "  Relay 서버 — 실행 중이 아님"
-fi
+kill_port "$RELAY_PORT" "Relay 서버"
 
 echo "완료."

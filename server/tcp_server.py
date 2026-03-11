@@ -711,6 +711,11 @@ class TCPServer:
             f"| location={location} event={event} detail={detail}"
         )
 
+        # 일반 motion_detected 는 로그만 남기고 웹 알림을 보내지 않음
+        # guard_alert / presence_alert 만 웹 브로드캐스트
+        if event == "motion_detected":
+            return
+
         import json as _j
         ws_msg = _j.dumps({
             "type":     "pir_alert",
@@ -732,8 +737,12 @@ class TCPServer:
 
     async def _on_disconnect(self, client: Optional[ESP32Client], addr: tuple):
         if client:
-            self._registry.pop(client.device_id, None)
-            self._unified_state_manager.remove(client.device_id)
+            # 재접속으로 새 클라이언트가 이미 등록된 경우,
+            # 이전 연결 해제 시 새 클라이언트를 제거하지 않음
+            current = self._registry.get(client.device_id)
+            if current is client:
+                self._registry.pop(client.device_id, None)
+                self._unified_state_manager.remove(client.device_id)
             client.close()
             logger.info(f"[TCP] 해제: {client.device_id} ({addr})")
             await self._broadcast(ws_device_list(self.get_device_list()))

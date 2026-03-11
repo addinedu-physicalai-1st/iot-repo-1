@@ -226,6 +226,8 @@ class STTEngine:
         self._running   = False
 
         self._state = STATE_IDLE
+        self._listen_start: Optional[float] = None  # 버튼/웨이크 트리거 시각
+        self._transcribing = False  # Whisper 추론 중 플래그
         self._audio_queue: asyncio.Queue = asyncio.Queue()
 
         self._nr_available      = False
@@ -368,10 +370,14 @@ class STTEngine:
 
     def activate(self):
         """버튼 모드: 외부 트리거 → 직접 LISTENING 전환"""
+        if self._transcribing:
+            logger.info("[STT] 명령 처리 중 — 버튼 무시")
+            return
         if self._state == STATE_IDLE:
             self._state    = STATE_LISTENING
             self._wake_mode = "button"
             self._t_wake   = time.time()
+            self._listen_start = time.time()
             self._stats.wake_mode_counts["button"] += 1
             logger.info("[STT] 외부 트리거(버튼) → LISTENING 활성화")
             self._d("DBG-WAKE", f"mode=button | t={self._t_wake:.3f} | IDLE→LISTENING")
@@ -465,7 +471,7 @@ class STTEngine:
         float_buf:     list[np.ndarray] = []
         silence_start: Optional[float]  = None
         speech_start:  Optional[float]  = None
-        listen_start:  Optional[float]  = None
+        self._listen_start = None
 
         # VAD 디버그: 연속 에너지 로그 간격 (매 N청크마다 출력)
         _vad_log_every = 10   # 약 0.32초마다
@@ -477,8 +483,8 @@ class STTEngine:
                     self._audio_queue.get(), timeout=0.5
                 )
             except asyncio.TimeoutError:
-                if self._state == STATE_LISTENING and listen_start:
-                    elapsed = time.time() - listen_start
+                if self._state == STATE_LISTENING and self._listen_start:
+                    elapsed = time.time() - self._listen_start
                     if elapsed > WAKE_LISTEN_SEC:
                         logger.info("[STT] 명령 대기 타임아웃 → IDLE")
                         self._d("DBG-WAKE",
@@ -488,7 +494,7 @@ class STTEngine:
                         float_buf     = []
                         silence_start = None
                         speech_start  = None
-                        listen_start  = None
+                        self._listen_start  = None
                         if self.on_timeout:
                             asyncio.create_task(self.on_timeout())
                 continue
@@ -523,11 +529,11 @@ class STTEngine:
                             f"thresh={self.energy_threshold} | "
                             f"qsize={qsize}")
 
-                if self._detect_porcupine(pcm_int16):
+                if self._detect_porcupine(pcm_int16) and not self._transcribing:
                     self._state     = STATE_LISTENING
                     self._wake_mode = "porcupine"
                     self._t_wake    = now
-                    listen_start    = now
+                    self._listen_start    = now
                     float_buf       = []
                     self._noise_frames = []
                     self._stats.wake_mode_counts["porcupine"] += 1
@@ -547,7 +553,7 @@ class STTEngine:
             # ════════════════════════
             elif self._state == STATE_LISTENING:
                 is_speech = energy > self.energy_threshold
-                listen_elapsed = now - listen_start if listen_start else 0
+                listen_elapsed = now - self._listen_start if self._listen_start else 0
 
                 # VAD 상세 로그
                 if self.debug_mode:
@@ -604,14 +610,14 @@ class STTEngine:
                             float_buf     = []
                             silence_start = None
                             speech_start  = None
-                            listen_start  = None
+                            self._listen_start  = None
 
-                    elif listen_start and listen_elapsed > WAKE_LISTEN_SEC:
+                    elif self._listen_start and listen_elapsed > WAKE_LISTEN_SEC:
                         logger.info("[STT] 발화 없음 타임아웃 → IDLE")
                         self._d("DBG-WAKE",
                                 f"TIMEOUT(no speech) | listen_elapsed={listen_elapsed:.2f}s → IDLE")
                         self._state  = STATE_IDLE
-                        listen_start = None
+                        self._listen_start = None
                         float_buf    = []
                         if self.on_timeout:
                             asyncio.create_task(self.on_timeout())
@@ -630,7 +636,7 @@ class STTEngine:
                 float_buf     = []
                 silence_start = None
                 speech_start  = None
-                listen_start  = None
+                self._listen_start  = None
 
     # ════════════════════════════════════════════
     # Porcupine 감지
@@ -719,18 +725,36 @@ class STTEngine:
 
     async def _transcribe(self, audio: np.ndarray, speech_start: Optional[float] = None):
         """오디오 → NR → Whisper → 정제 → 콜백 + 디버그 타임라인"""
+        # 동시 Whisper 실행 방지
+        if self._transcribing:
+            logger.warning("[STT] Whisper 추론 중 — 중복 요청 무시")
+            return
+        self._transcribing = True
+        try:
+            await self._do_transcribe(audio, speech_start)
+        finally:
+            self._transcribing = False
+
+    async def _do_transcribe(self, audio: np.ndarray, speech_start: Optional[float] = None):
+        """_transcribe 내부 구현 (finally에서 _transcribing 해제 보장)"""
         loop      = asyncio.get_event_loop()
         audio_sec = len(audio) / SAMPLE_RATE
         t_transcribe_start = time.time()
 
         logger.info(f"[TIMER] ▶ [1] Whisper 추론 시작 | 오디오: {audio_sec:.1f}s")
 
-        # NR + Whisper 를 executor 에서 실행
+        # NR + Whisper 를 executor 에서 실행 (30초 타임아웃)
         t0 = time.time()
         try:
-            result = await loop.run_in_executor(
-                None, self._run_whisper_with_debug, audio
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, self._run_whisper_with_debug, audio
+                ),
+                timeout=30.0
             )
+        except asyncio.TimeoutError:
+            logger.error("[STT] Whisper 추론 타임아웃 (30초 초과) → IDLE 복귀")
+            return
         except Exception as e:
             logger.error(f"[STT] 추론 오류: {e}")
             self._d("DBG-STT", f"추론 오류: {e}", level="error")

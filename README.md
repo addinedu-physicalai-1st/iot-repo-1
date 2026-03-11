@@ -8,13 +8,17 @@
 
 ## 주요 기능
 
-- 한국어 음성 인식 (faster-whisper) + 웨이크워드 감지 (Porcupine)
-- LLM 자연어 파싱 (Ollama - exaone3.5:7.8b)
-- ESP32 TCP 통신 (LED, 서보모터, DHT22, 7세그먼트)
+- 한국어 음성 인식 (OpenAI Whisper) + 웨이크워드 감지 (Porcupine)
+  - Whisper 동시 실행 방지 + 30초 타임아웃
+  - 명령 처리 중 웨이크워드/버튼 입력 자동 차단
+- LLM 자연어 파싱 (Ollama - exaone3.5:7.8b) + 8초 타임아웃 / 파싱 실패 시 TTS 안내
+- ESP32 TCP 통신 (LED, 서보모터, 스텝모터(커튼), DHT11, 7세그먼트)
+  - 재접속 시 디바이스 등록 보호 (이전 연결 해제가 새 연결을 제거하지 않음)
 - 웹 대시보드 (홈 평면도, 실시간 센서, 명령 로그)
 - TTS 음성 응답 (Microsoft Edge TTS)
-- PIR 보안 모드 (외출/취침 시 침입 감지)
+- PIR 보안 모드 (외출/취침 시 침입 감지, 디바운싱 + 쿨다운 적용)
 - SmartGate 2FA 출입 시스템 (얼굴인식 → 라이브니스 → 제스처 인증)
+- 얼굴 임베딩 Fernet 암호화 저장 (face_store.py)
 - MySQL 이벤트 로그 (장기 보관 + 검색/조회 API)
 - 패턴 분석 (활동 시각화 + 이상 패턴 탐지)
 - PyQt6 GUI 대시보드 (선택)
@@ -220,8 +224,8 @@ ollama run exaone3.5:7.8b
 ### 8. 서버 실행 / 종료
 
 ```bash
-./run_server.sh    # 서버 시작 (JWT_SECRET 최초 1회 자동 생성)
-./kill_server.sh   # 서버 종료
+./run_server.sh    # 서버 시작 (JWT_SECRET 최초 1회 자동 생성, 기존 프로세스 자동 정리)
+./kill_server.sh   # 서버 종료 (SIGTERM → 5초 대기 → SIGKILL 단계적 종료)
 ```
 
 ### 기능 비활성화 (선택)
@@ -325,8 +329,8 @@ Authorization: Bearer <token>
 
 | 디바이스 ID | 위치 | 기능 |
 |-------------|------|------|
-| `esp32_home1` | 홈 컨트롤러 #1 | 침실 서보(커튼), 욕실 7세그먼트, DHT11 |
-| `esp32_home2` | 홈 컨트롤러 #2 | LED 5개, 차고·현관 서보, PIR 센서 |
+| `esp32_home1` | 홈 컨트롤러 #1 | 침실 서보(커튼), 욕실 7세그먼트, DHT11, PIR 센서 |
+| `esp32_home2` | 홈 컨트롤러 #2 | LED 5개, 차고·현관 서보, PIR 센서, 침실 스텝모터(커튼) |
 | `esp32_cam`   | 현관 카메라 | MJPEG UDP 스트리밍 (SmartGate) |
 | `esp32_bt_speaker` | BT 스피커 (ESP32-WROVER) | WiFi + BT A2DP 음악 스트리밍 |
 
@@ -521,4 +525,4 @@ curl "http://localhost:8000/logs/pattern/anomalies?threshold=2.0" \
 
 ---
 
-*iot-repo-1 · Voice IoT Controller · Stephen · 2026-03-10*
+*iot-repo-1 · Voice IoT Controller · Stephen · 2026-03-11*
