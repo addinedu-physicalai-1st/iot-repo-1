@@ -141,14 +141,25 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_
     # ── GET / ───────────────────────────────────────────────────────
     @router.get("/", response_class=HTMLResponse)
     async def serve_index():
-        """첫 페이지: web/index_dashboard.html 서빙"""
-        index_path = WEB_DIR / "index_dashboard.html"
+        """첫 페이지: web/index_final.html 서빙"""
+        index_path = WEB_DIR / "index_final.html"
         if not index_path.exists():
             return HTMLResponse(
-                content="<h2>대시보드 준비 중입니다. (web/index_dashboard.html 없음)</h2>",
+                content="<h2>대시보드 준비 중입니다. (web/index_final.html 없음)</h2>",
                 status_code=200,
             )
         return FileResponse(str(index_path))
+
+    # @router.get("/", response_class=HTMLResponse)
+    # async def serve_index():
+    #     """첫 페이지: web/index_dashboard.html 서빙"""
+    #     index_path = WEB_DIR / "index_dashboard.html"
+    #     if not index_path.exists():
+    #         return HTMLResponse(
+    #             content="<h2>대시보드 준비 중입니다. (web/index_dashboard.html 없음)</h2>",
+    #             status_code=200,
+    #         )
+    #     return FileResponse(str(index_path))
 
     # ── GET /devices ─────────────────────────────────────────────────
     @router.get("/devices")
@@ -706,6 +717,25 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_
         """BT 스피커 상태 조회 (WiFi, BT, 스트리밍, 볼륨)"""
         return await _bt_proxy_get("/status")
 
+    @router.get("/bt-speaker/youtube-title")
+    async def bt_speaker_youtube_title(url: str = Query(""), user=Depends(verify_token)):
+        """YouTube URL → 영상 제목 추출 (yt-dlp 필요)"""
+        import subprocess
+        if not url or "youtube" not in url.lower() and "youtu.be" not in url.lower():
+            return {"title": url or "", "error": "invalid url"}
+        try:
+            result = subprocess.run(
+                ["yt-dlp", "--get-title", "--no-warnings", "--no-playlist", url],
+                capture_output=True, text=True, timeout=15
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return {"title": result.stdout.strip()}
+            return {"title": url, "error": "title not found"}
+        except FileNotFoundError:
+            return {"title": url, "error": "yt-dlp not installed"}
+        except Exception as e:
+            return {"title": url, "error": str(e)}
+
     @router.get("/bt-speaker/playlist")
     async def bt_speaker_playlist(user=Depends(verify_token)):
         """BT 스피커 플레이리스트 조회"""
@@ -722,6 +752,25 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_
         """BT 스피커 플레이리스트에서 트랙 삭제"""
         body = await request.form()
         return await _bt_proxy_post("/playlist/del", data={"idx": body.get("idx", "")})
+
+    @router.post("/bt-speaker/playlist/insert")
+    async def bt_speaker_playlist_insert(request: Request, user=Depends(verify_token)):
+        """BT 스피커 플레이리스트 특정 위치에 삽입"""
+        body = await request.form()
+        return await _bt_proxy_post("/playlist/insert", data={
+            "idx": body.get("idx", ""),
+            "url": body.get("url", ""),
+            "title": body.get("title", ""),
+        })
+
+    @router.post("/bt-speaker/playlist/move")
+    async def bt_speaker_playlist_move(request: Request, user=Depends(verify_token)):
+        """BT 스피커 플레이리스트 순서 변경 (from_idx → to_idx)"""
+        body = await request.form()
+        return await _bt_proxy_post("/playlist/move", data={
+            "from": str(body.get("from", "")),
+            "to": str(body.get("to", "")),
+        })
 
     @router.post("/bt-speaker/playlist/clear")
     async def bt_speaker_playlist_clear(user=Depends(verify_token)):

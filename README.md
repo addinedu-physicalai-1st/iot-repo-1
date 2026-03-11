@@ -61,7 +61,7 @@ iot-repo-1/
 ├── protocol/
 │   └── schema.py                    # TCP/WS 메시지 스키마
 ├── web/
-│   └── index_dashboard.html         # 대시보드 (홈맵 + 센서 + 로그)
+│   └── index_final.html         # 대시보드 (홈맵 + 센서 + 로그)
 ├── esp32/                           # ESP32 펌웨어 소스
 │   ├── config.h.example             # WiFi/IP/HMAC 설정 템플릿 (→ config.h로 복사)
 │   ├── config.h                     # WiFi/IP/HMAC 설정 (Git 미포함)

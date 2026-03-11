@@ -472,7 +472,9 @@ class CommandRouter:
             # ESP32 미연결이어도 모드는 세팅됐으므로 camera_stream 억제는 동작함
             logger.warning(f"[Router] esp32_home2 미연결 — 모드={cmd} 상태는 저장됨")
             if pir_mode == "dnd":
-                return ws_cmd_result("ok", "방해금지 모드 설정 완료 (ESP32 미연결 — 알람 억제 적용)")
+                if self._tcp.ws_broadcast:
+                    await self._tcp.ws_broadcast(_j.dumps({"type": "pir_mode", "mode": cmd}, ensure_ascii=False))
+                return _j.dumps({"type": "cmd_result", "status": "ok", "msg": "방해금지 모드 설정 완료 (ESP32 미연결 — 알람 억제 적용)", "cmd": cmd}, ensure_ascii=False)
             return ws_cmd_result("fail", "esp32_home2 미연결")
 
         # ── dnd_mode: ESP32에 pir_mode:dnd 전송 (LED 켜지 않도록) ──
@@ -485,8 +487,9 @@ class CommandRouter:
             }) + "\n").encode()
             await self._tcp.send_command(pir_device, _sign_payload(payload))
             logger.info("[Router] 방해금지 모드 — ESP32 pir_mode:dnd 전송 (LED 차단)")
-            msg = "방해금지 모드 설정 완료 — 모든 알람·팝업 무시, 로그 기록 유지"
-            return ws_cmd_result("ok", msg)
+            if self._tcp.ws_broadcast:
+                await self._tcp.ws_broadcast(_j.dumps({"type": "pir_mode", "mode": cmd}, ensure_ascii=False))
+            return _j.dumps({"type": "cmd_result", "status": "ok", "msg": "방해금지 모드 설정 완료 — 모든 알람·팝업 무시, 로그 기록 유지", "cmd": cmd}, ensure_ascii=False)
 
         # ── guard 모드 진입: LED 상태 스냅샷 저장 ──────────────────
         if pir_mode == "guard":
@@ -549,15 +552,13 @@ class CommandRouter:
             await self._tcp._broadcast(ws_device_update(pir_device, client.state))
 
         msg = f"PIR {pir_mode} 모드 설정 완료 (context={context})"
+        if self._tcp.ws_broadcast:
+            await self._tcp.ws_broadcast(_j.dumps({"type": "pir_mode", "mode": cmd}, ensure_ascii=False))
+        payload = {"type": "cmd_result", "status": "ok", "msg": msg, "cmd": cmd}
         if tts:
-            return _json.dumps({
-                "type": "cmd_result",
-                "status": "ok",
-                "msg": msg,
-                "tts_response": tts,
-            }, ensure_ascii=False)
-
-        return ws_cmd_result("ok", msg)
+            payload["tts_response"] = tts
+            return _j.dumps(payload, ensure_ascii=False)
+        return _j.dumps(payload, ensure_ascii=False)
 
     async def _execute_pir_dismiss(self, data: dict) -> str:
         """
@@ -1085,6 +1086,7 @@ class CommandRouter:
         voice_text 처리 결과에 original_text, display_text 추가.
         - 성공 시: display_text = LLM 해석 결과 (오인식 교정)
         - 실패/unknown 시: display_text 없음 → 프론트는 original_text 사용
+        - ESP32 미연결 시에도 UI 반영을 위해 cmd/room/state/angle 항상 포함
         """
         try:
             obj = _json.loads(result)
@@ -1098,7 +1100,23 @@ class CommandRouter:
             display = self._cmd_to_display_text(parsed_data)
             if display:
                 obj["display_text"] = display
-        # fail/unknown/warn: display_text 없음 → 프론트는 original_text 그대로 표시
+        # ESP32 미연결(fail) 시에도 UI에 의도된 상태 반영
+        cmd = parsed_data.get("cmd")
+        if cmd:
+            obj["cmd"] = cmd
+            if cmd in ("all_on", "all_off"):
+                obj["state"] = "on" if cmd == "all_on" else "off"
+            elif cmd == "led" and "room" in parsed_data and "state" in parsed_data:
+                obj["room"] = parsed_data.get("room")
+                obj["state"] = parsed_data.get("state")
+            elif cmd == "servo" and "room" in parsed_data and parsed_data.get("angle") is not None:
+                obj["room"] = parsed_data.get("room")
+                obj["angle"] = parsed_data.get("angle")
+            elif cmd == "set_bathroom_temp" and parsed_data.get("value") is not None:
+                obj["value"] = parsed_data.get("value")
+            elif cmd == "heating" and "room" in parsed_data and "state" in parsed_data:
+                obj["room"] = parsed_data.get("room")
+                obj["state"] = parsed_data.get("state")
         return _json.dumps(obj, ensure_ascii=False)
 
     def _resolve_device(self, data: dict) -> Optional[str]:
@@ -1190,6 +1208,11 @@ class CommandRouter:
         # ── 난방 관련 오인식 ──────────────────────────────────────────
         # 남방/냄방/난빵/냄빵/남빵/란방/남바/남빵 → 난방
         text = _re.sub(r'[남냄난란][방빵바]', '난방', text)
+        # 난 방/반/망 켜/꺼 (STT "난방" 오인식) → 난방
+        text = _re.sub(r'난\s*(방|반|망)\s*(켜|꺼|끄|키라고|켜줘|꺼줘|틀어)', r'난방 \2', text)
+        text = _re.sub(r'난\s*(방|반|망)(켜|꺼|끄)', r'난방 \2', text)
+        text = _re.sub(r'난방(켜)(?![줘요])', r'난방 켜', text)
+        text = _re.sub(r'난방(꺼|끄)(?![줘요])', r'난방 꺼', text)
 
         # ── 보일러 오인식 ─────────────────────────────────────────────
         # 뵈일러/보이러/보일로/뵈일로 → 보일러
@@ -1318,7 +1341,7 @@ class CommandRouter:
             return {"cmd": "status", "room": r, "target": target}
 
         # ── 욕실 난방 (LED/전원 키워드보다 먼저 체크) ────────────────────
-        if any(k in text for k in ["난방 켜", "난방 틀어", "난방 시작", "보일러 켜", "보일러 틀어", "욕실 따뜻"]):
+        if any(k in text for k in ["난방 켜", "난방 키라고", "난방 틀어", "난방 시작", "보일러 켜", "보일러 틀어", "욕실 따뜻"]):
             return {"cmd": "heating", "room": "bathroom", "state": "on",
                     "tts_response": "욕실 난방을 켰어요."}
         if any(k in text for k in ["난방 꺼", "난방 끄", "난방 정지", "보일러 꺼", "보일러 끄"]):

@@ -147,10 +147,11 @@ Rules:
      - 욕실 / 목욕탕 + 온도 몇 도 / 몇 도야 / 온도 알려줘 / 온도 확인  → cmd: "query_bathroom_temp"
      - 예: "욕실 온도 몇 도야?" / "욕실 지금 몇 도?" / "목욕탕 온도 알려줘"
   4-6. Bathroom heating keywords (HIGHEST PRIORITY — always room: "bathroom", never ask clarification):
-     - 난방 켜 / 남방 켜 / 냄방 켜 / 난빵 켜 / 보일러 켜 / 욕실 따뜻하게 / 욕실 난방  → cmd: "heating", state: "on"
-     - 난방 꺼 / 남방 꺼 / 냄방 꺼 / 보일러 꺼 / 난방 끄 / 난방 정지                  → cmd: "heating", state: "off"
+     - 난방 켜 / 난 방 켜 / 난방켜 / 남방 켜 / 냄방 켜 / 난빵 켜 / 보일러 켜 / 욕실 따뜻하게 / 욕실 난방  → cmd: "heating", state: "on"
+     - 난방 꺼 / 난 방 꺼 / 난방꺼 / 남방 꺼 / 냄방 꺼 / 보일러 꺼 / 난방 끄 / 난방 정지  → cmd: "heating", state: "off"
      - 이 집에는 욕실 난방만 있으므로 "어디 난방?"을 절대 되묻지 말고 즉시 bathroom으로 처리한다.
-     - 예: "난방 켜줘" / "보일러 틀어" / "남방 켜" / "난방 꺼줘" / "보일러 꺼"
+     - "난 방 켜", "난 방켜", "난 반켜", "난 망켜", "난 방 키라고" 는 반드시 heating(on)으로 해석 (방 조명 아님)
+     - 예: "난방 켜줘" / "보일러 틀어" / "남방 켜" / "난 방 켜" / "난방 꺼줘" / "보일러 꺼"
   5. If the command is completely unknown: {"cmd": "unknown", "msg": "<reason in Korean>", "tts_response": "<friendly Korean apology>"}
   6. Always include "tts_response" field with a short, natural Korean spoken response.
   7. Status query keywords → use cmd: "status":

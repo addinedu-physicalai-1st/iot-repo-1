@@ -1732,12 +1732,6 @@ header {
             <span class="ts-val" id="ts-val-garage-door">닫힘</span>
           </label>
         </div>
-        <div class="servo-wrap">
-          <div class="servo-label"><span>차고문 각도</span><span id="servo-garage-val">0°</span></div>
-          <input class="servo-slider" type="range" min="0" max="180" value="0"
-            oninput="document.getElementById('servo-garage-val').textContent=this.value+'°'"
-            onchange="sendDoor('garage',parseInt(this.value))">
-        </div>
       </div>
 
       <!-- 욕실 -->
@@ -1774,12 +1768,6 @@ header {
             <span class="ts-val" id="ts-val-bedroom-curtain">닫힘</span>
           </label>
         </div>
-        <div class="servo-wrap">
-          <div class="servo-label"><span>커튼 각도 &nbsp;(0°=닫힘 / 90°=열림)</span><span id="servo-bedroom-val">0°</span></div>
-          <input class="servo-slider" type="range" min="0" max="90" value="0"
-            oninput="document.getElementById('servo-bedroom-val').textContent=this.value+'°'"
-            onchange="sendCurtain(parseInt(this.value))">
-        </div>
       </div>
 
       <!-- 현관 -->
@@ -1799,12 +1787,6 @@ header {
             <div class="ts-track" id="ts-entrance-door"><div class="ts-thumb"></div></div>
             <span class="ts-val" id="ts-val-entrance-door">닫힘</span>
           </label>
-        </div>
-        <div class="servo-wrap">
-          <div class="servo-label"><span>현관문 각도</span><span id="servo-entrance-val">0°</span></div>
-          <input class="servo-slider" type="range" min="0" max="180" value="0"
-            oninput="document.getElementById('servo-entrance-val').textContent=this.value+'°'"
-            onchange="sendDoor('entrance',parseInt(this.value))">
         </div>
       </div>
 
@@ -2554,22 +2536,13 @@ function updateDeviceState(device_id, state) {
         updateLedStatus(room, state[`led_${lpin}`] === 1 ? 'on' : 'off');
       }
       if (spin !== undefined && state[`servo_${spin}`] !== undefined) {
-        const angle  = state[`servo_${spin}`];
-        const slider = document.querySelector(`#card-${room} .servo-slider`);
-        const valEl  = document.getElementById(`servo-${room}-val`);
-        if (slider) slider.value = angle;
-        if (valEl)  valEl.textContent = angle + '°';
+        const angle = state[`servo_${spin}`];
         if (room === 'bedroom') updateCurtainStatus(angle);
         else                    updateDoorStatus(room, angle);
       }
       // esp32_home1: 침실 서보는 GPIO 2 (servo_2)
       if (room === 'bedroom' && state['servo_2'] !== undefined) {
-        const angle  = state['servo_2'];
-        const slider = document.querySelector('#card-bedroom .servo-slider');
-        const valEl  = document.getElementById('servo-bedroom-val');
-        if (slider) slider.value = angle;
-        if (valEl)  valEl.textContent = angle + '°';
-        updateCurtainStatus(angle);
+        updateCurtainStatus(state['servo_2']);
       }
     });
     return;
@@ -2583,11 +2556,7 @@ function updateDeviceState(device_id, state) {
     updateLedStatus(key, state.led_2 === 1 ? 'on' : 'off');
   }
   if (state.servo_18 !== undefined) {
-    const angle  = state.servo_18;
-    const slider = document.querySelector(`#card-${key} .servo-slider`);
-    const valEl  = document.getElementById(`servo-${key}-val`);
-    if (slider) slider.value = angle;
-    if (valEl)  valEl.textContent = angle + '°';
+    const angle = state.servo_18;
     if (key === 'bedroom')       updateCurtainStatus(angle);
     else if (key === 'garage')   updateDoorStatus('garage', angle);
     else if (key === 'entrance') updateDoorStatus('entrance', angle);
@@ -2701,11 +2670,6 @@ function updateLedStatus(key, state) {
 function sendDoor(key, angle) {
   // v3: device_id 생략 → 서버가 room 기반으로 esp32_home1/home2 자동 라우팅
   sendCmd({ cmd:'servo', room: key, angle });
-  // 슬라이더 동기화
-  const slider = document.querySelector(`#card-${key} .servo-slider`);
-  const valEl  = document.getElementById(`servo-${key}-val`);
-  if (slider) slider.value = angle;
-  if (valEl)  valEl.textContent = angle + '°';
   updateDoorStatus(key, angle);
 }
 
@@ -2727,11 +2691,6 @@ function updateDoorStatus(key, angle) {
 function sendCurtain(angle) {
   // v3: bedroom servo → 서버가 esp32_home1으로 자동 라우팅
   sendCmd({ cmd:'servo', room:'bedroom', angle });
-  // 슬라이더 동기화
-  const slider = document.querySelector('#card-bedroom .servo-slider');
-  const valEl  = document.getElementById('servo-bedroom-val');
-  if (slider) slider.value = angle;
-  if (valEl)  valEl.textContent = angle + '°';
   updateCurtainStatus(angle);
 }
 
@@ -4851,10 +4810,12 @@ async function btSpLoadPl() {
   }
   el.innerHTML = titles.map((t, i) => {
     const active = (d.current !== undefined && d.current === i) ? 'color:var(--cyan);font-weight:bold;' : '';
-    const title = (typeof t === 'string') ? t : (t.title || t.url || `트랙 ${i + 1}`);
-    return `<div style="display:flex;align-items:center;gap:4px;padding:3px 0;border-bottom:1px solid var(--border);${active}">
-      <span style="cursor:pointer;flex:1;" onclick="btSpPlay(${i})" title="재생">${i + 1}. ${title}</span>
-      <button class="music-btn" onclick="btSpDelPl(${i})" style="padding:2px 6px;font-size:0.55rem;" title="삭제">✕</button>
+    const tit = (typeof t === 'string') ? t : (t.title || t.url || `트랙 ${i + 1}`);
+    const upBtn = i > 0 ? `<button class="music-btn" onclick="btSpMovePl(${i},${i-1})" style="padding:2px 4px;font-size:0.5rem;" title="위로">▲</button>` : '';
+    const dnBtn = i < titles.length - 1 ? `<button class="music-btn" onclick="btSpMovePl(${i},${i+1})" style="padding:2px 4px;font-size:0.5rem;" title="아래로">▼</button>` : '';
+    return `<div style="display:flex;align-items:center;gap:2px;padding:3px 0;border-bottom:1px solid var(--border);${active}">
+      <span style="cursor:pointer;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;" onclick="btSpPlay(${i})" title="재생">${i + 1}. ${tit.replace(/</g,'&lt;')}</span>
+      ${upBtn}${dnBtn}<button class="music-btn" onclick="btSpDelPl(${i})" style="padding:2px 6px;font-size:0.55rem;" title="삭제">✕</button>
     </div>`;
   }).join('');
 }
@@ -4912,15 +4873,21 @@ async function btSpAdd() {
   const titleEl = document.getElementById('btSpTitle');
   const url = urlEl.value.trim();
   if (!url) { _btSpMsg('URL을 입력하세요'); return; }
+  let title = titleEl.value.trim();
+  if (!title) {
+    _btSpMsg('제목 조회 중...');
+    const titRes = await _btSpFetch('/bt-speaker/youtube-title?url=' + encodeURIComponent(url));
+    title = (titRes && titRes.title && !titRes.error) ? titRes.title : url;
+  }
   _btSpMsg('추가 중...');
   const body = new URLSearchParams();
   body.append('url', url);
-  if (titleEl.value.trim()) body.append('title', titleEl.value.trim());
+  body.append('title', title);
   const d = await _btSpFetch('/bt-speaker/playlist/add', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
   if (d && !d.error) {
-    _btSpMsg('추가 완료');
+    _btSpMsg('추가 완료: ' + title.substring(0, 20));
     urlEl.value = ''; titleEl.value = '';
-    log(`🔊 BT 스피커 플레이리스트 추가: ${url}`, 'info');
+    log(`🔊 BT 스피커 플레이리스트 추가: ${title}`, 'info');
     setTimeout(btSpLoadPl, 300);
   } else {
     _btSpMsg(d?.error || '추가 실패');
@@ -4930,6 +4897,12 @@ async function btSpAdd() {
 async function btSpDelPl(idx) {
   const body = new URLSearchParams(); body.append('idx', idx);
   await _btSpFetch('/bt-speaker/playlist/del', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+  btSpLoadPl();
+}
+
+async function btSpMovePl(fromIdx, toIdx) {
+  const body = new URLSearchParams(); body.append('from', fromIdx); body.append('to', toIdx);
+  await _btSpFetch('/bt-speaker/playlist/move', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
   btSpLoadPl();
 }
 

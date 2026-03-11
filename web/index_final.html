@@ -1,0 +1,1457 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice IoT Controller - Tab Interface</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+button, input[type="range"], .toggle-track { touch-action: manipulation; }
+
+:root {
+  --violet: #8B5CF6; --sky: #38BDF8; --rose: #F472B6; --emerald: #34D399;
+  --glass-bg: rgba(255,255,255,0.08); --glass-border: rgba(255,255,255,0.15);
+  --glass-hover: rgba(255,255,255,0.12); --radius: 18px; --radius-sm: 12px;
+  --header-h: 56px; --voice-h: 72px; --status-h: 32px;
+}
+
+body {
+  font-family: 'Inter', sans-serif; height: 100vh; height: 100dvh;
+  background: linear-gradient(135deg, #1e0533 0%, #0f172a 40%, #0c1631 60%, #120a2e 100%);
+  color: #e2e8f0; overflow: hidden; -webkit-text-size-adjust: 100%;
+}
+
+.orb { position: fixed; border-radius: 50%; filter: blur(100px); opacity: 0.45; pointer-events: none; z-index: 0; animation: orbFloat 20s ease-in-out infinite alternate; }
+.orb-1 { width: 500px; height: 500px; background: #8B5CF6; top: -10%; left: -8%; animation-duration: 22s; }
+.orb-2 { width: 400px; height: 400px; background: #38BDF8; top: 30%; right: -5%; animation-duration: 18s; animation-delay: -5s; }
+.orb-3 { width: 350px; height: 350px; background: #F472B6; bottom: -5%; left: 25%; animation-duration: 25s; animation-delay: -10s; }
+.orb-4 { width: 300px; height: 300px; background: #34D399; bottom: 20%; right: 20%; animation-duration: 20s; animation-delay: -3s; opacity: 0.3; }
+@keyframes orbFloat { 0%{transform:translate(0,0)scale(1);} 33%{transform:translate(30px,-20px)scale(1.05);} 66%{transform:translate(-20px,15px)scale(0.95);} 100%{transform:translate(10px,-10px)scale(1.02);} }
+@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.5;} }
+
+.glass {
+  background: var(--glass-bg); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border); border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.glow-violet  { box-shadow: 0 8px 32px rgba(139,92,246,0.12), inset 0 1px 0 rgba(255,255,255,0.08); }
+.glow-sky     { box-shadow: 0 8px 32px rgba(56,189,248,0.12), inset 0 1px 0 rgba(255,255,255,0.08); }
+.glow-rose    { box-shadow: 0 8px 32px rgba(244,114,182,0.12), inset 0 1px 0 rgba(255,255,255,0.08); }
+.glow-emerald { box-shadow: 0 8px 32px rgba(52,211,153,0.12), inset 0 1px 0 rgba(255,255,255,0.08); }
+
+/* ── Header with Tabs ── */
+header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: var(--header-h);
+  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+  background: rgba(15,10,30,0.75); border-bottom: 1px solid var(--glass-border);
+  display: flex; align-items: center; padding: 0 24px; gap: 20px;
+}
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1rem; flex-shrink: 0; }
+.logo-icon { width: 30px; height: 30px; background: linear-gradient(135deg, var(--violet), var(--sky)); border-radius: 8px; display: grid; place-items: center; font-size: 0.85rem; box-shadow: 0 0 16px rgba(139,92,246,0.4); }
+
+.tab-bar {
+  display: flex; gap: 4px; padding: 4px; border-radius: 14px;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+}
+.tab-btn {
+  padding: 7px 18px; border-radius: 10px; border: none;
+  background: transparent; color: #94a3b8; font-family: 'Inter'; font-size: 0.82rem;
+  font-weight: 500; cursor: pointer; transition: all 0.25s; white-space: nowrap;
+}
+.tab-btn:hover { color: #cbd5e1; background: rgba(255,255,255,0.06); }
+.tab-btn.active {
+  background: var(--violet); color: #fff;
+  box-shadow: 0 0 16px rgba(139,92,246,0.4);
+}
+
+.header-right { display: flex; align-items: center; gap: 12px; margin-left: auto; flex-shrink: 0; }
+.ws-status { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #94a3b8; }
+.ws-dot { width: 7px; height: 7px; border-radius: 50%; background: #64748b; box-shadow: none; transition: all 0.3s; }
+.ws-dot.connected { background: var(--emerald); box-shadow: 0 0 6px var(--emerald); animation: pulse 2s infinite; }
+.clock { font-size: 0.78rem; color: #cbd5e1; font-variant-numeric: tabular-nums; }
+
+/* ── Tab Content ── */
+.tab-content {
+  position: relative; z-index: 1;
+  margin-top: var(--header-h);
+  height: calc(100vh - var(--header-h) - var(--voice-h) - var(--status-h));
+  overflow-y: auto; padding: 16px 24px; max-width: 1440px; margin-left: auto; margin-right: auto;
+}
+.tab-content::-webkit-scrollbar { width: 4px; }
+.tab-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── Home Tab ── */
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.stat-card { padding: 20px; text-align: center; transition: transform 0.25s; }
+.stat-card:hover { transform: translateY(-2px); }
+.stat-icon { font-size: 1.5rem; margin-bottom: 8px; }
+.stat-value { font-size: 1.4rem; font-weight: 700; background: linear-gradient(135deg, var(--violet), var(--sky)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.stat-label { font-size: 0.72rem; color: #94a3b8; margin-top: 4px; }
+.home-map-wrap { max-width: 700px; margin: 0 auto 20px; }
+.house-map-canvas { width: 100%; aspect-ratio: 5/3; border-radius: var(--radius-sm); background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); display: block; }
+.recent-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 10px; }
+.recent-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.recent-card { padding: 14px; font-size: 0.78rem; display: flex; align-items: flex-start; gap: 8px; }
+.recent-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+.recent-dot.ok { background: var(--emerald); box-shadow: 0 0 4px var(--emerald); }
+.recent-dot.info { background: var(--sky); box-shadow: 0 0 4px var(--sky); }
+.recent-dot.warn { background: #f59e0b; box-shadow: 0 0 4px #f59e0b; }
+.recent-dot.alarm { background: #ef4444; box-shadow: 0 0 4px #ef4444; }
+.recent-msg { color: #cbd5e1; line-height: 1.3; }
+.recent-time { font-size: 0.65rem; color: #64748b; margin-top: 2px; }
+
+/* ── Devices Tab ── */
+.device-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.device-card { padding: 18px; transition: transform 0.25s, background 0.25s; }
+.device-card:hover { transform: translateY(-2px); background: var(--glass-hover); }
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.card-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.88rem; }
+.card-icon { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 0.9rem; }
+.badge-online { font-size: 0.6rem; background: rgba(52,211,153,0.15); color: var(--emerald); padding: 3px 8px; border-radius: 12px; border: 1px solid rgba(52,211,153,0.25); }
+.badge-online.offline { background: rgba(239,68,68,0.15); color: #ef4444; border-color: rgba(239,68,68,0.25); }
+
+.toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; }
+.toggle-label { font-size: 0.82rem; color: #cbd5e1; }
+.toggle-track {
+  width: 42px; height: 22px; border-radius: 11px;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.12);
+  position: relative; cursor: pointer; transition: background 0.25s, box-shadow 0.25s; flex-shrink: 0;
+}
+.toggle-track.on { background: var(--violet); box-shadow: 0 0 10px rgba(139,92,246,0.45); border-color: transparent; }
+.toggle-track.on.green { background: var(--emerald); box-shadow: 0 0 10px rgba(52,211,153,0.45); }
+.toggle-track.on.sky { background: var(--sky); box-shadow: 0 0 10px rgba(56,189,248,0.45); }
+.toggle-track.on.rose { background: var(--rose); box-shadow: 0 0 10px rgba(244,114,182,0.45); }
+.toggle-thumb { width: 16px; height: 16px; border-radius: 50%; background: #fff; position: absolute; top: 2px; left: 2px; transition: transform 0.25s; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+.toggle-track.on .toggle-thumb { transform: translateX(20px); }
+
+.slider-row { margin-top: 6px; }
+.slider-row label { font-size: 0.78rem; color: #94a3b8; display: flex; justify-content: space-between; margin-bottom: 4px; }
+.slider-row label span { color: #e2e8f0; font-weight: 500; }
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.1); outline: none; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--violet); border: 2px solid #fff; cursor: pointer; }
+
+.temp-display { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding: 10px 12px; background: rgba(255,255,255,0.04); border-radius: 10px; }
+.temp-value { font-size: 1.5rem; font-weight: 700; background: linear-gradient(135deg, var(--sky), var(--violet)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.temp-sub { font-size: 0.65rem; color: #64748b; }
+.temp-target { font-size: 0.75rem; color: #94a3b8; }
+.temp-target strong { color: var(--rose); font-size: 0.95rem; }
+.temp-btns { display: flex; gap: 4px; margin-left: auto; }
+.temp-btn { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.06); color: #e2e8f0; font-size: 0.9rem; cursor: pointer; display: grid; place-items: center; font-family: 'Inter'; }
+.temp-btn:hover { background: rgba(255,255,255,0.12); }
+
+.mode-buttons { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.mode-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.05); color: #cbd5e1; font-family: 'Inter'; font-size: 0.75rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+.mode-btn:hover { background: rgba(255,255,255,0.1); }
+.mode-btn.active { background: rgba(139,92,246,0.25); border-color: var(--violet); color: #fff; }
+.status-pir { margin-top: 8px; display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #94a3b8; }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 4px var(--emerald); }
+
+.speaker-now { font-size: 0.72rem; color: #94a3b8; }
+.speaker-title { font-size: 0.92rem; font-weight: 600; margin-bottom: 10px; background: linear-gradient(90deg, var(--violet), var(--rose)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.play-controls { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; }
+.play-btn { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.06); color: #e2e8f0; font-size: 0.82rem; cursor: pointer; display: grid; place-items: center; }
+.play-btn.main-play { width: 42px; height: 42px; background: linear-gradient(135deg, var(--violet), var(--rose)); border: none; font-size: 1rem; box-shadow: 0 0 12px rgba(139,92,246,0.35); }
+.play-btn:hover { transform: scale(1.08); }
+.volume-row { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: #94a3b8; }
+.volume-row input { flex: 1; }
+.music-progress-wrap {
+  height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; cursor: pointer; margin: 8px 0; position: relative; overflow: hidden;
+}
+.music-progress-bar { height: 100%; background: linear-gradient(90deg, var(--violet), var(--rose)); border-radius: 3px; width: 0%; transition: width 0.3s; }
+.music-time { font-size: 0.65rem; color: #64748b; font-variant-numeric: tabular-nums; display: flex; justify-content: space-between; margin-bottom: 4px; }
+.pl-add-row { display: flex; gap: 6px; margin-top: 8px; }
+.playlist-area { margin-top: 8px; padding: 6px; background: rgba(255,255,255,0.03); border-radius: 8px; max-height: 140px; overflow-y: auto; }
+.playlist-item { padding: 5px 6px; border-radius: 6px; font-size: 0.72rem; color: #94a3b8; display: flex; align-items: center; gap: 4px; }
+.playlist-item:hover { background: rgba(255,255,255,0.06); }
+.playlist-item.active { color: var(--violet); font-weight: 500; }
+.playlist-item .pl-title { flex: 1; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.playlist-item .pl-ctrl { display: flex; gap: 2px; flex-shrink: 0; }
+.playlist-item .pl-btn { width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: rgba(255,255,255,0.06); color: #94a3b8; cursor: pointer; font-size: 0.6rem; line-height: 1; }
+.playlist-item .pl-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.pl-actions { margin-top: 4px; }
+.cam-ref { font-size: 0.78rem; color: #94a3b8; padding: 8px 0; }
+.cam-ref a { color: var(--sky); cursor: pointer; text-decoration: none; }
+
+/* ── Monitoring Tab ── */
+.camera-placeholder {
+  width: 100%; aspect-ratio: 16/9; max-height: 45vh; background: rgba(0,0,0,0.3); border-radius: var(--radius-sm);
+  display: grid; place-items: center; color: #64748b; font-size: 0.9rem;
+  border: 1px solid rgba(255,255,255,0.06); position: relative; overflow: hidden; margin-bottom: 10px;
+}
+.live-badge { position: absolute; top: 10px; left: 10px; background: #ef4444; color: #fff; font-size: 0.6rem; font-weight: 700; padding: 3px 10px; border-radius: 6px; animation: pulse 2s infinite; }
+.camera-btns { display: flex; gap: 8px; margin-bottom: 14px; }
+.cam-btn { flex: 1; padding: 9px; border-radius: 10px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.05); color: #cbd5e1; font-family: 'Inter'; font-size: 0.78rem; font-weight: 500; cursor: pointer; text-align: center; }
+.cam-btn:hover { background: rgba(255,255,255,0.1); }
+.monitor-bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.monitor-card { padding: 16px; }
+.monitor-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.house-map-canvas-sm { width: 100%; aspect-ratio: 4/3; border-radius: var(--radius-sm); background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); display: block; }
+.pir-mode-display { font-size: 1.4rem; font-weight: 700; color: var(--violet); margin: 8px 0; }
+.pir-info-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; color: #94a3b8; font-size: 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.pir-info-row:last-child { border-bottom: none; }
+
+/* ── Logs Tab ── */
+.log-filters { display: flex; gap: 6px; margin-bottom: 14px; }
+.filter-btn { padding: 7px 16px; border-radius: 10px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.05); color: #cbd5e1; font-family: 'Inter'; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+.filter-btn:hover { background: rgba(255,255,255,0.1); }
+.filter-btn.active { background: rgba(139,92,246,0.25); border-color: var(--violet); color: #fff; }
+.log-full-list { list-style: none; }
+.log-full-item {
+  display: flex; align-items: center; gap: 14px; padding: 14px 18px; margin-bottom: 8px;
+  border-radius: var(--radius-sm); background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06); border-left: 3px solid transparent;
+}
+.log-full-item:hover { background: rgba(255,255,255,0.07); }
+.log-full-item.ok { border-left-color: var(--emerald); }
+.log-full-item.info { border-left-color: var(--sky); }
+.log-full-item.warn { border-left-color: #f59e0b; }
+.log-full-item.alarm { border-left-color: #ef4444; }
+.log-full-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.log-full-dot.ok { background: var(--emerald); box-shadow: 0 0 6px var(--emerald); }
+.log-full-dot.info { background: var(--sky); box-shadow: 0 0 6px var(--sky); }
+.log-full-dot.warn { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+.log-full-dot.alarm { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+.log-full-msg { flex: 1; font-size: 0.88rem; color: #e2e8f0; }
+.log-full-time { font-size: 0.78rem; color: #64748b; flex-shrink: 0; }
+.db-log-btn { width: 100%; margin-top: 12px; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--glass-border); background: rgba(255,255,255,0.05); color: #cbd5e1; font-family: 'Inter'; font-size: 0.88rem; font-weight: 600; cursor: pointer; }
+.db-log-btn:hover { background: rgba(255,255,255,0.1); }
+
+/* ── Command Center Tab ── */
+.cc-hero-zone {
+  display: grid; grid-template-columns: 40% 35% 25%; gap: 12px; min-height: 42vh; margin-bottom: 14px;
+}
+.cc-panel { padding: 16px; display: flex; flex-direction: column; }
+.cc-panel-title {
+  font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em;
+  margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.cc-panel-title .lc { color: var(--sky); }
+.cc-map-canvas {
+  flex: 1; width: 100%; min-height: 200px; border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); display: block;
+}
+.cc-camera-feed {
+  flex: 1; width: 100%; min-height: 160px; aspect-ratio: 16/9;
+  background: rgba(0,0,0,0.35); border-radius: var(--radius-sm);
+  display: grid; place-items: center; color: #64748b; font-size: 0.85rem;
+  border: 1px solid rgba(255,255,255,0.06); position: relative; overflow: hidden; margin-bottom: 10px;
+}
+.cc-camera-time {
+  position: absolute; bottom: 8px; right: 10px; font-size: 0.65rem;
+  color: rgba(255,255,255,0.5); font-variant-numeric: tabular-nums;
+}
+.cc-cam-controls { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
+.cc-cam-btn {
+  padding: 7px 4px; border-radius: 8px; border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.05); color: #cbd5e1; font-family: 'Inter'; font-size: 0.68rem;
+  font-weight: 500; cursor: pointer; text-align: center; transition: all 0.2s;
+}
+.cc-cam-btn:hover { background: rgba(255,255,255,0.1); }
+.cc-log-list {
+  list-style: none; flex: 1; overflow-y: auto;
+  max-height: 630px;  /* ~30 items visible */
+}
+.cc-log-list::-webkit-scrollbar { width: 3px; }
+.cc-log-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+.cc-log-item {
+  display: flex; align-items: flex-start; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.72rem;
+}
+.cc-log-item:last-child { border-bottom: none; }
+.cc-log-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.cc-log-dot.info { background: var(--sky); box-shadow: 0 0 5px var(--sky); }
+.cc-log-dot.ok { background: var(--emerald); box-shadow: 0 0 5px var(--emerald); }
+.cc-log-dot.warn { background: #f59e0b; box-shadow: 0 0 5px #f59e0b; }
+.cc-log-dot.alarm { background: #ef4444; box-shadow: 0 0 5px #ef4444; }
+.cc-log-msg { color: #cbd5e1; flex: 1; line-height: 1.35; }
+.cc-log-time { color: #64748b; font-size: 0.65rem; flex-shrink: 0; white-space: nowrap; }
+.cc-device-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+
+@media (max-width: 1100px) {
+  .cc-hero-zone { grid-template-columns: 1fr 1fr; min-height: auto; }
+  .cc-hero-zone > :last-child { grid-column: 1 / -1; }
+  .cc-device-grid { grid-template-columns: repeat(2,1fr); }
+}
+@media (max-width: 700px) {
+  .cc-hero-zone { grid-template-columns: 1fr; }
+  .cc-hero-zone > :last-child { grid-column: auto; }
+  .cc-device-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Voice Dock ── */
+.voice-dock {
+  position: fixed; bottom: var(--status-h); left: 0; right: 0; z-index: 100;
+  height: var(--voice-h);
+  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+  background: rgba(15,10,30,0.8); border-top: 1px solid var(--glass-border);
+  display: flex; align-items: center; padding: 0 24px; gap: 18px;
+}
+.mic-btn {
+  width: 50px; height: 50px; border-radius: 50%; border: none;
+  background: linear-gradient(135deg, var(--violet), #6d28d9);
+  color: #fff; font-size: 1.2rem; cursor: pointer; flex-shrink: 0;
+  box-shadow: 0 0 20px rgba(139,92,246,0.4);
+  transition: transform 0.2s; display: grid; place-items: center;
+}
+.mic-btn:hover { transform: scale(1.08); }
+.mic-btn.active { background: linear-gradient(135deg, #ef4444, #dc2626); box-shadow: 0 0 24px rgba(239,68,68,0.5); animation: micPulse 1s infinite; }
+@keyframes micPulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.06);} }
+.voice-texts { flex: 1; min-width: 0; }
+.voice-label { font-size: 0.6rem; letter-spacing: 0.12em; color: var(--violet); font-weight: 600; text-transform: uppercase; }
+.voice-user { font-size: 0.92rem; font-weight: 500; }
+.voice-user.placeholder { color: #94a3b8; font-weight: 400; }
+.voice-result { font-size: 0.78rem; color: var(--emerald); }
+.voice-result.empty { color: #64748b; }
+.voice-input-row { display: flex; gap: 6px; flex-shrink: 0; width: 300px; }
+.voice-input {
+  flex: 1; background: rgba(255,255,255,0.06); border: 1px solid var(--glass-border);
+  border-radius: 10px; padding: 9px 14px; color: #e2e8f0; font-family: 'Inter';
+  font-size: 0.85rem; outline: none;
+}
+.voice-input:focus { border-color: var(--violet); }
+.voice-input::placeholder { color: #64748b; }
+.send-btn {
+  background: linear-gradient(135deg, var(--violet), var(--sky)); border: none; border-radius: 10px;
+  color: #fff; padding: 9px 16px; font-family: 'Inter'; font-weight: 600;
+  font-size: 0.82rem; cursor: pointer; white-space: nowrap;
+}
+
+/* Status Bar */
+.status-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+  height: var(--status-h);
+  backdrop-filter: blur(30px); background: rgba(15,10,30,0.8);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex; align-items: center; justify-content: center; gap: 28px;
+  font-size: 0.68rem; color: #64748b;
+}
+.status-item { display: flex; align-items: center; gap: 5px; }
+.dot-green { width: 5px; height: 5px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 4px var(--emerald); }
+
+/* ── Responsive: Tablet ── */
+@media (max-width: 900px) {
+  :root { --header-h: 96px; }
+  header { flex-wrap: wrap; height: auto; padding: 8px 16px; gap: 8px; }
+  .logo { order: 0; }
+  .header-right { order: 1; }
+  .tab-bar { order: 2; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tab-bar::-webkit-scrollbar { display: none; }
+  .tab-btn { padding: 7px 14px; font-size: 0.75rem; flex-shrink: 0; }
+  .tab-content { padding: 14px 16px; }
+  .stat-row, .device-grid { grid-template-columns: 1fr 1fr; }
+  .monitor-bottom { grid-template-columns: 1fr; }
+  .recent-row { grid-template-columns: 1fr 1fr; }
+  .voice-input-row { width: 200px; }
+  .cc-device-grid { grid-template-columns: repeat(2,1fr); }
+}
+
+/* ── Responsive: Mobile ── */
+@media (max-width: 600px) {
+  :root { --header-h: 92px; --voice-h: 108px; --status-h: 28px; }
+  header { padding: 6px 12px; gap: 6px; }
+  .logo-icon { width: 26px; height: 26px; font-size: 0.75rem; }
+  .logo { font-size: 0.88rem; gap: 7px; }
+  .tab-btn { padding: 6px 10px; font-size: 0.72rem; }
+  .clock { font-size: 0.72rem; }
+  .ws-status span { display: none; }
+
+  .tab-content { padding: 12px; height: calc(100dvh - var(--header-h) - var(--voice-h) - var(--status-h)); }
+  .device-grid, .stat-row, .recent-row { grid-template-columns: 1fr; }
+  .stat-card { padding: 14px; }
+  .stat-value { font-size: 1.1rem; }
+  .home-map-wrap { max-width: 100%; }
+
+  .device-card { padding: 14px; }
+  .card-title { font-size: 0.82rem; }
+  .toggle-track { width: 44px; height: 24px; }
+  .toggle-thumb { width: 18px; height: 18px; }
+  .toggle-track.on .toggle-thumb { transform: translateX(20px); }
+  .temp-display { flex-wrap: wrap; gap: 8px; }
+  .mode-btn { padding: 8px 14px; font-size: 0.78rem; }
+
+  .camera-placeholder { max-height: 35vh; }
+
+  .voice-dock { flex-wrap: wrap; height: var(--voice-h); min-height: var(--voice-h); padding: 10px 12px; gap: 8px; overflow-y: auto; }
+  .voice-dock .mic-btn { width: 44px; height: 44px; font-size: 1rem; }
+  .voice-texts { width: calc(100% - 56px); }
+  .voice-input-row { width: 100%; }
+  .voice-input { padding: 10px 12px; font-size: 0.88rem; }
+  .send-btn { padding: 10px 18px; }
+
+  .status-bar { height: 28px; gap: 12px; font-size: 0.6rem; }
+
+  /* CC tab mobile */
+  .cc-hero-zone { grid-template-columns: 1fr; min-height: auto; }
+  .cc-hero-zone > :last-child { grid-column: auto; }
+  .cc-map-canvas { min-height: 160px; }
+  .cc-camera-feed { min-height: 120px; }
+  .cc-device-grid { grid-template-columns: 1fr; }
+
+  .log-full-item { padding: 10px 12px; gap: 10px; }
+  .log-full-msg { font-size: 0.8rem; }
+  .filter-btn { padding: 6px 10px; font-size: 0.72rem; }
+}
+
+/* ── Responsive: Small phone ── */
+@media (max-width: 400px) {
+  .tab-btn { padding: 6px 8px; font-size: 0.68rem; }
+  .stat-row { gap: 8px; }
+  .stat-icon { font-size: 1.2rem; margin-bottom: 4px; }
+  .stat-value { font-size: 1rem; }
+  .stat-label { font-size: 0.65rem; }
+  .device-grid, .cc-device-grid { gap: 8px; }
+  .recent-card { padding: 10px; }
+  .play-btn { width: 36px; height: 36px; }
+  .play-btn.main-play { width: 46px; height: 46px; }
+}
+
+/* Use dvh for mobile browsers with dynamic viewport */
+@supports (height: 100dvh) {
+  .tab-content { height: calc(100dvh - var(--header-h) - var(--voice-h) - var(--status-h)); }
+}
+</style>
+</head>
+<body>
+
+<div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div><div class="orb orb-4"></div>
+
+<header>
+  <div class="logo"><div class="logo-icon">&#9889;</div><span>Voice IoT</span></div>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="home">🏠 홈</button>
+    <button class="tab-btn" data-tab="devices">💡 디바이스</button>
+    <button class="tab-btn" data-tab="monitor">📹 모니터링</button>
+    <button class="tab-btn" data-tab="logs">📊 로그</button>
+    <button class="tab-btn" data-tab="command">🎛 커맨드센터</button>
+  </div>
+  <div class="header-right">
+    <div class="ws-status"><div class="ws-dot" id="wsDot"></div><span id="wsLabel">WS 끊김</span></div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+</header>
+
+<div class="tab-content">
+  <!-- Home -->
+  <div class="tab-panel active" id="tab-home">
+    <div class="stat-row">
+      <div class="stat-card glass glow-emerald"><div class="stat-icon">🔌</div><div class="stat-value">8/8</div><div class="stat-label">Online Devices</div></div>
+      <div class="stat-card glass glow-sky"><div class="stat-icon">🌡</div><div class="stat-value">24.5 → 26.0°C</div><div class="stat-label">욕실 온도</div></div>
+      <div class="stat-card glass glow-rose"><div class="stat-icon">🛡</div><div class="stat-value">귀가</div><div class="stat-label">보안 모드</div></div>
+      <div class="stat-card glass glow-violet"><div class="stat-icon">🎵</div><div class="stat-value">Chill Lo-Fi</div><div class="stat-label">Now Playing</div></div>
+    </div>
+    <div class="home-map-wrap"><div class="glass glow-sky" style="padding:16px"><div style="font-size:0.85rem;font-weight:600;margin-bottom:10px">🏠 House Map</div><canvas class="house-map-canvas" id="houseMap"></canvas></div></div>
+    <div class="recent-title">🕐 Recent Activity</div>
+    <div class="recent-row" id="recentRow"></div>
+  </div>
+
+  <!-- Devices -->
+  <div class="tab-panel" id="tab-devices"><div class="device-grid" id="deviceGrid"></div></div>
+
+  <!-- Monitoring -->
+  <div class="tab-panel" id="tab-monitor">
+    <div class="glass glow-emerald" style="padding:16px;margin-bottom:14px">
+      <div style="font-size:0.85rem;font-weight:600;margin-bottom:10px">📹 Camera Feed</div>
+      <div class="camera-placeholder" id="monitorCamWrap">
+        <img id="monitorCamImg" src="" alt="Camera" style="display:none;width:100%;height:100%;object-fit:contain;border-radius:var(--radius-sm)">
+        <span class="live-badge" id="monitorLiveBadge" style="display:none">LIVE</span>
+        <span id="monitorCamPlaceholder">📷 ESP32-CAM Stream</span>
+      </div>
+      <div class="camera-btns"><button class="cam-btn" id="monitorStreamBtn">▶ Stream</button><button class="cam-btn" id="monitorSnapshotBtn">📸 Snapshot</button><button class="cam-btn" id="monitorAuthBtn">🔐 Auth</button><button class="cam-btn" id="monitorFaceBtn">👤 Face</button></div>
+    </div>
+    <div class="monitor-bottom">
+      <div class="monitor-card glass glow-sky"><div class="monitor-title">🏠 House Map</div><canvas class="house-map-canvas-sm" id="houseMapMon"></canvas></div>
+      <div class="monitor-card glass glow-rose"><div class="monitor-title">🛡 PIR Security</div><div class="pir-mode-display" id="monitorPirModeDisplay">귀가 모드</div><div class="pir-info-row"><span class="status-dot"></span><span id="monitorPirStatusText">모든 센서 정상 작동</span></div><div class="pir-info-row"><span class="status-dot"></span>마지막 감지: <span id="monitorPirLastDetect">--:--:--</span> (현관)</div><div class="pir-info-row"><span class="status-dot"></span>오늘 감지 횟수: <span id="monitorPirCount">0</span>회</div></div>
+    </div>
+  </div>
+
+  <!-- Logs -->
+  <div class="tab-panel" id="tab-logs">
+    <div class="log-filters">
+      <button class="filter-btn active" onclick="filterLogs('all',this)">전체</button>
+      <button class="filter-btn" onclick="filterLogs('ok',this)">성공</button>
+      <button class="filter-btn" onclick="filterLogs('info',this)">정보</button>
+      <button class="filter-btn" onclick="filterLogs('warn',this)">경고</button>
+      <button class="filter-btn" onclick="filterLogs('alarm',this)">알람</button>
+    </div>
+    <ul class="log-full-list" id="logFullList"></ul>
+    <button class="db-log-btn">🗃️ DB EVENT LOG</button>
+  </div>
+
+  <!-- Command Center -->
+  <div class="tab-panel" id="tab-command">
+    <div class="cc-hero-zone">
+      <div class="cc-panel glass glow-sky">
+        <div class="cc-panel-title">🏠 <span class="lc">House Map</span></div>
+        <canvas class="cc-map-canvas" id="houseMapCC"></canvas>
+      </div>
+      <div class="cc-panel glass glow-emerald">
+        <div class="cc-panel-title">📹 <span class="lc">Camera Feed</span></div>
+        <div class="cc-camera-feed" id="ccCamFeed">
+          <img id="ccCamImg" src="" alt="Camera" style="display:none;width:100%;height:100%;object-fit:contain;border-radius:8px">
+          <span class="live-badge">● LIVE</span>
+          <span id="ccCamPlaceholder">📷 Camera Stream</span>
+          <span class="cc-camera-time" id="ccCamTime">--:--:--</span>
+        </div>
+        <div class="cc-cam-controls">
+          <button class="cc-cam-btn" id="ccStreamBtn">▶ Stream</button>
+          <button class="cc-cam-btn" id="ccSnapshotBtn">📸 Snapshot</button>
+          <button class="cc-cam-btn" id="ccAuthBtn">🔐 Auth</button>
+          <button class="cc-cam-btn" id="ccFaceBtn">👤 Face Reg.</button>
+        </div>
+      </div>
+      <div class="cc-panel glass glow-violet">
+        <div class="cc-panel-title">📜 <span class="lc">Command Log</span></div>
+        <ul class="cc-log-list" id="ccLogList"></ul>
+      </div>
+    </div>
+    <div class="cc-device-grid" id="ccDeviceGrid"></div>
+  </div>
+</div>
+
+<!-- Voice Dock -->
+<div class="voice-dock">
+  <button class="mic-btn" id="micBtn">&#127908;</button>
+  <div class="voice-texts">
+    <div class="voice-label">VOICE COMMAND</div>
+    <div class="voice-user placeholder" id="voiceUser">"자비스야"라고 불러주세요</div>
+    <div class="voice-result empty" id="voiceResult">—</div>
+  </div>
+  <div class="voice-input-row">
+    <input type="text" class="voice-input" placeholder="명령어를 입력하세요..." id="manualInput">
+    <button class="send-btn" id="sendBtn">전송</button>
+  </div>
+</div>
+
+<div class="status-bar">
+  <div class="status-item" id="tcpStatus"><span class="dot-green" id="tcpDot"></span><span id="tcpLabel">TCP: 0 devices</span></div>
+  <div class="status-item" id="serverAddr">Server: ---</div>
+  <div class="status-item" id="lastUpdate">Last update: --</div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  // ════════════════════════════════════════════
+  // JWT & WebSocket
+  // ════════════════════════════════════════════
+  let _jwtToken = sessionStorage.getItem('jwt_token') || '';
+  const WS_URL = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws';
+  let ws = null;
+  let wsRetryTimer = null;
+  let _isConnecting = false;
+
+  async function fetchToken(password) {
+    try {
+      const res = await fetch('/auth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'dashboard', password: password || '' })
+      });
+      if (!res.ok) throw new Error('로그인 실패');
+      const data = await res.json();
+      _jwtToken = data.access_token;
+      sessionStorage.setItem('jwt_token', _jwtToken);
+      return true;
+    } catch (e) {
+      _jwtToken = '';
+      sessionStorage.removeItem('jwt_token');
+      return false;
+    }
+  }
+
+  function getAuthHeaders() {
+    return _jwtToken ? { 'Authorization': 'Bearer ' + _jwtToken } : {};
+  }
+
+  async function connectWS() {
+    if (_isConnecting) return;
+    _isConnecting = true;
+    clearTimeout(wsRetryTimer);
+    try {
+      const ok = await fetchToken('');
+      if (!ok) {
+        log('JWT 토큰 발급 실패 — 3초 후 재시도', 'warn');
+        _isConnecting = false;
+        wsRetryTimer = setTimeout(connectWS, 3000);
+        return;
+      }
+      const url = WS_URL + '?token=' + _jwtToken;
+      ws = new WebSocket(url);
+      ws.onopen = function() {
+        _isConnecting = false;
+        setWsStatus(true);
+        log('WebSocket 연결', 'info');
+        clearTimeout(wsRetryTimer);
+        setTimeout(function(){ sendWS({ type:'llm_cmd', cmd:'status', target:'all' }); }, 300);
+      };
+      ws.onclose = function() {
+        _isConnecting = false;
+        setWsStatus(false);
+        log('WebSocket 끊김 - 3초 후 재연결', 'warn');
+        wsRetryTimer = setTimeout(connectWS, 3000);
+      };
+      ws.onerror = function() { log('WebSocket 오류', 'fail'); };
+      ws.onmessage = function(e) {
+        try { handleServerMsg(JSON.parse(e.data)); } catch(err) { console.error('WS 파싱 오류:', err); }
+      };
+    } catch (e) {
+      _isConnecting = false;
+      wsRetryTimer = setTimeout(connectWS, 3000);
+    }
+  }
+
+  function sendWS(data) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
+    else log('WS 미연결', 'fail');
+  }
+
+  function setWsStatus(connected) {
+    var dot = document.getElementById('wsDot');
+    var lbl = document.getElementById('wsLabel');
+    if (dot) dot.className = 'ws-dot' + (connected ? ' connected' : '');
+    if (lbl) lbl.textContent = connected ? 'WS 연결됨' : 'WS 끊김';
+  }
+
+  // ════════════════════════════════════════════
+  // sendCmd & device control
+  // ════════════════════════════════════════════
+  function sendCmd(data) {
+    sendWS({ type: 'manual_cmd', cmd: data.cmd, room: data.room, state: data.state, angle: data.angle, mode: data.mode, value: data.value });
+    var msg = '→ ' + (data.cmd || '') + (data.room ? ' ' + data.room : '') + (data.state ? ' ' + data.state : '') + (data.angle !== undefined ? ' ' + data.angle + '°' : '') + (data.mode ? ' [' + data.mode + ']' : '');
+    log(msg, 'info');
+  }
+
+  var house = {
+    garage: { led: false, door: false },
+    living: { led: false },
+    bedroom: { led: false, curtain: false },
+    entrance: { led: false, door: false },
+    bathroom: { led: false, heating: false }
+  };
+
+  function toggleLed(room) {
+    var isOn = (house[room] || {}).led;
+    sendCmd({ cmd: 'led', room: room, state: isOn ? 'off' : 'on' });
+    house[room] = house[room] || {}; house[room].led = !isOn;
+    updateLedUI(room, !isOn);
+  }
+
+  function sendDoor(room, angle) {
+    sendCmd({ cmd: 'servo', room: room, angle: angle });
+    house[room] = house[room] || {}; house[room].door = angle >= 45;
+    updateDoorUI(room, angle);
+  }
+
+  function toggleDoor(room, openAngle) {
+    var isOpen = (house[room] || {}).door;
+    sendDoor(room, isOpen ? 0 : openAngle);
+  }
+
+  function sendCurtain(angle) {
+    sendCmd({ cmd: 'servo', room: 'bedroom', angle: angle });
+    house.bedroom.curtain = angle >= 45;
+    updateCurtainUI(angle);
+  }
+
+  function toggleCurtain() {
+    var isOpen = house.bedroom.curtain;
+    sendCurtain(isOpen ? 0 : 90);
+  }
+
+  function sendHeating(state) {
+    sendCmd({ cmd: 'heating', room: 'bathroom', state: state });
+    house.bathroom.heating = state === 'on';
+    updateHeatingUI(state === 'on');
+  }
+
+  function setBathroomTemp(value) {
+    sendCmd({ cmd: 'set_bathroom_temp', value: value });
+    document.querySelectorAll('.target-temp').forEach(function(el){ el.textContent = value.toFixed(1) + '°C'; });
+  }
+
+  function refreshAllMaps() {
+    drawMap('houseMap');
+    drawMap('houseMapMon');
+    drawMap('houseMapCC');
+  }
+
+  function updateLedUI(room, on) {
+    document.querySelectorAll('[data-room="' + room + '"][data-ctrl="led"]').forEach(function(track) {
+      track.className = 'toggle-track' + (on ? ' on green' : '') + ' green';
+    });
+    refreshAllMaps();
+  }
+
+  function updateDoorUI(room, angle) {
+    document.querySelectorAll('[data-room="' + room + '"][data-ctrl="door"]').forEach(function(track) {
+      track.className = 'toggle-track' + (angle >= 45 ? ' on sky' : '') + ' sky';
+    });
+    refreshAllMaps();
+  }
+
+  function updateCurtainUI(angle) {
+    document.querySelectorAll('[data-room="bedroom"][data-ctrl="curtain"]').forEach(function(track) {
+      track.className = 'toggle-track' + (angle >= 45 ? ' on sky' : '') + ' sky';
+    });
+    refreshAllMaps();
+  }
+
+  function updateHeatingUI(on) {
+    document.querySelectorAll('[data-room="bathroom"][data-ctrl="heating"]').forEach(function(track) {
+      track.className = 'toggle-track' + (on ? ' on rose' : '') + ' rose';
+    });
+    refreshAllMaps();
+  }
+
+  function handleToggle(el, room, ctrl) {
+    el.classList.toggle('on');
+    if (ctrl === 'led') toggleLed(room);
+    else if (ctrl === 'door') toggleDoor(room, 90);
+    else if (ctrl === 'curtain') toggleCurtain();
+    else if (ctrl === 'heating') sendHeating(el.classList.contains('on') ? 'on' : 'off');
+  }
+  window.handleToggle = handleToggle;
+
+  // ════════════════════════════════════════════
+  // Log
+  // ════════════════════════════════════════════
+  function esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+  var CC_LOG_MAX = 100;
+  window._ccAutoScroll = true;
+
+  function log(msg, type) {
+    type = type || 'info';
+    var t = new Date().toTimeString().slice(0,8);
+    var fl = document.getElementById('logFullList');
+    var li = document.createElement('li');
+    li.className = 'log-full-item ' + type;
+    li.dataset.type = type;
+    li.innerHTML = '<span class="log-full-dot ' + type + '"></span><span class="log-full-msg">' + esc(msg) + '</span><span class="log-full-time">' + t + '</span>';
+    if (fl) fl.insertBefore(li, fl.firstChild);
+
+    var rr = document.getElementById('recentRow');
+    if (rr) {
+      var rc = rr.querySelectorAll('.recent-card');
+      if (rc.length >= 4) rc[rc.length-1].remove();
+      var d = document.createElement('div');
+      d.className = 'recent-card glass';
+      d.innerHTML = '<span class="recent-dot ' + type + '"></span><div><div class="recent-msg">' + esc(msg) + '</div><div class="recent-time">' + t + '</div></div>';
+      rr.insertBefore(d, rr.firstChild);
+    }
+
+    var ccLog = document.getElementById('ccLogList');
+    if (ccLog) {
+      if (ccLog.children.length >= CC_LOG_MAX) ccLog.removeChild(ccLog.firstChild);
+      var cli = document.createElement('li');
+      cli.className = 'cc-log-item';
+      cli.innerHTML = '<span class="cc-log-dot ' + type + '"></span><span class="cc-log-msg">' + esc(msg) + '</span><span class="cc-log-time">' + t + '</span>';
+      ccLog.appendChild(cli);
+      if (window._ccAutoScroll !== false) ccLog.scrollTop = ccLog.scrollHeight;
+    }
+
+    document.getElementById('lastUpdate').textContent = 'Last update: ' + t;
+  }
+
+  // ════════════════════════════════════════════
+  // handleServerMsg
+  // ════════════════════════════════════════════
+  var DEVICE_MAP = { 'esp32_garage':'garage','esp32_bathroom':'bathroom','esp32_bedroom':'bedroom','esp32_entrance':'entrance','esp32_living':'living' };
+  var HOME_DEVICE_IDS = ['esp32_home','esp32_home1','esp32_home2'];
+  var ALL_ROOMS = ['living','bathroom','bedroom','garage','entrance'];
+
+  function setDeviceOnline(key, online) {
+    var card = document.getElementById('card-' + key);
+    var badge = document.getElementById('badge-' + key);
+    var cardCC = document.getElementById('card-cc-' + key);
+    var badgeCC = document.getElementById('badge-cc-' + key);
+    if (card) {
+      if (online) { card.classList.add('online'); if (badge) { badge.textContent = 'ONLINE'; badge.className = 'badge-online'; } }
+      else { card.classList.remove('online'); if (badge) { badge.textContent = 'OFFLINE'; badge.className = 'badge-online offline'; } }
+    }
+    if (cardCC) {
+      if (online) { cardCC.classList.add('online'); if (badgeCC) { badgeCC.textContent = 'ONLINE'; badgeCC.className = 'badge-online'; } }
+      else { cardCC.classList.remove('online'); if (badgeCC) { badgeCC.textContent = 'OFFLINE'; badgeCC.className = 'badge-online offline'; } }
+    }
+  }
+
+  function handleServerMsg(data) {
+    var type = data.type;
+    if (type === 'device_list') {
+      ALL_ROOMS.forEach(function(k){ setDeviceOnline(k, false); });
+      (data.devices || []).forEach(function(d) {
+        if (HOME_DEVICE_IDS.indexOf(d.device_id) >= 0) ALL_ROOMS.forEach(function(k){ setDeviceOnline(k, true); });
+        else { var k = DEVICE_MAP[d.device_id]; if (k) setDeviceOnline(k, true); }
+      });
+      var tcpDot = document.getElementById('tcpDot');
+      var tcpLabel = document.getElementById('tcpLabel');
+      var cnt = (data.devices || []).length;
+      if (tcpDot) tcpDot.style.background = cnt > 0 ? 'var(--emerald)' : '#ef4444';
+      if (tcpLabel) tcpLabel.textContent = 'TCP: ' + cnt + ' device' + (cnt !== 1 ? 's' : '');
+    }
+    else if (type === 'device_update') {
+      var key = DEVICE_MAP[data.device_id];
+      if (!key && HOME_DEVICE_IDS.indexOf(data.device_id) >= 0) {
+        var st = data.state || {};
+        if (st.led_2 !== undefined) { house.living.led = st.led_2 === 1; updateLedUI('living', st.led_2 === 1); }
+        if (st.led_4 !== undefined) { house.bathroom.led = st.led_4 === 1; updateLedUI('bathroom', st.led_4 === 1); }
+        if (st.led_5 !== undefined) { house.bedroom.led = st.led_5 === 1; updateLedUI('bedroom', st.led_5 === 1); }
+        if (st.led_12 !== undefined) { house.garage.led = st.led_12 === 1; updateLedUI('garage', st.led_12 === 1); }
+        if (st.led_13 !== undefined) { house.entrance.led = st.led_13 === 1; updateLedUI('entrance', st.led_13 === 1); }
+        if (st.servo_14 !== undefined) { house.bedroom.curtain = st.servo_14 >= 45; updateCurtainUI(st.servo_14); }
+        if (st.servo_15 !== undefined) { house.garage.door = st.servo_15 >= 45; updateDoorUI('garage', st.servo_15); }
+        if (st.servo_16 !== undefined) { house.entrance.door = st.servo_16 >= 45; updateDoorUI('entrance', st.servo_16); }
+      } else if (key && data.state) {
+        var s = data.state;
+        if (s.led_2 !== undefined) { house[key].led = s.led_2 === 1; updateLedUI(key, s.led_2 === 1); }
+        if (s.servo_18 !== undefined) {
+          if (key === 'bedroom') { house.bedroom.curtain = s.servo_18 >= 45; updateCurtainUI(s.servo_18); }
+          else { house[key].door = s.servo_18 >= 45; updateDoorUI(key, s.servo_18); }
+        }
+      }
+    }
+    else if (type === 'sensor_data' && data.room === 'bathroom' && data.temp != null) {
+      document.querySelectorAll('.temp-bathroom').forEach(function(tv){ tv.textContent = data.temp.toFixed(1) + '°C'; });
+    }
+    else if (type === 'cmd_result') {
+      var mb = document.getElementById('micBtn');
+      if (mb) mb.classList.remove('active');
+      var result = document.getElementById('voiceResult');
+      var isOk = data.status === 'ok' || data.status === 'conversation';
+      var respText = data.tts_response || data.msg || '';
+      result.textContent = (isOk ? '✅ ' : '❌ ') + respText;
+      result.style.color = isOk ? 'var(--emerald)' : '#ef4444';
+      result.classList.remove('empty');
+      var userText = data.original_text || window._lastSttText || '';
+      if (userText) {
+        var vu = document.getElementById('voiceUser');
+        vu.textContent = userText;
+        vu.classList.remove('placeholder');
+        vu.style.color = '';
+      }
+      log(respText || data.msg || '', isOk ? 'ok' : 'fail');
+      // ESP32 미연결(fail) 시에도 의도된 상태를 UI에 반영
+      if (data.cmd === 'all_on') { ALL_ROOMS.forEach(function(r){ house[r] = house[r] || {}; house[r].led = true; updateLedUI(r, true); }); }
+      else if (data.cmd === 'all_off') { ALL_ROOMS.forEach(function(r){ house[r] = house[r] || {}; house[r].led = false; updateLedUI(r, false); }); }
+      else if (data.cmd === 'led' && data.room && data.state) { house[data.room] = house[data.room] || {}; house[data.room].led = data.state === 'on'; updateLedUI(data.room, data.state === 'on'); }
+      else if (data.cmd === 'servo' && data.room != null && data.angle !== undefined) {
+        if (data.room === 'bedroom') { house.bedroom.curtain = data.angle >= 45; updateCurtainUI(data.angle); }
+        else { house[data.room].door = data.angle >= 45; updateDoorUI(data.room, data.angle); }
+      }
+      if (data.cmd === 'set_bathroom_temp' && data.value != null) {
+        document.querySelectorAll('.target-temp').forEach(function(tt){ tt.textContent = data.value.toFixed(1) + '°C'; });
+      }
+      if (data.cmd === 'heating' && data.room === 'bathroom') { house.bathroom.heating = data.state === 'on'; updateHeatingUI(data.state === 'on'); }
+      if (['away_mode','home_mode','sleep_mode','wake_mode','dnd_mode'].indexOf(data.cmd) >= 0) { updatePirUI(data.cmd); }
+      clearTimeout(window._idleFallbackTimer);
+      clearTimeout(window._cmdClearTimer);
+      clearTimeout(window._voicePlaceholderTimer);
+      window._cmdClearTimer = setTimeout(clearVoiceResult, 4500);
+      window._voicePlaceholderTimer = setTimeout(clearVoiceText, 4500);
+    }
+    else if (type === 'heating_state' && data.room === 'bathroom') {
+      house.bathroom.heating = data.state === 'on';
+      updateHeatingUI(data.state === 'on');
+    }
+    else if (type === 'music_control') {
+      handleMusicControl(data.action, data.value);
+    }
+    else if (type === 'wake_detected') {
+      clearTimeout(window._idleFallbackTimer);
+      document.getElementById('voiceUser').textContent = '명령을 말씀하세요...';
+      document.getElementById('voiceUser').classList.remove('placeholder');
+      document.getElementById('micBtn').classList.add('active');
+      window._idleFallbackTimer = setTimeout(function(){ clearVoiceText(); clearVoiceResult(); }, 12000);
+    }
+    else if (type === 'pir_mode' && data.mode) {
+      updatePirUI(data.mode);
+    }
+    else if (type === 'pir_alert') {
+      var ld = document.getElementById('monitorPirLastDetect');
+      if (ld) ld.textContent = new Date().toTimeString().slice(0, 8);
+      window._pirCountToday = (window._pirCountToday || 0) + 1;
+      var pc = document.getElementById('monitorPirCount');
+      if (pc) pc.textContent = window._pirCountToday;
+      log(data.msg || 'PIR 감지', 'alarm');
+    }
+    else if (type === 'stt_result') {
+      clearTimeout(window._idleFallbackTimer);
+      var sttText = data.text || '';
+      window._lastSttText = sttText;
+      var vu = document.getElementById('voiceUser');
+      var vr = document.getElementById('voiceResult');
+      vu.textContent = sttText || '🔄 인식 중...';
+      vu.classList.remove('placeholder');
+      vu.style.color = sttText ? '' : 'var(--sky)';
+      vr.textContent = '🔄 처리 중...';
+      vr.classList.remove('empty');
+      vr.style.color = 'var(--sky)';
+      window._idleFallbackTimer = setTimeout(function(){ clearVoiceText(); clearVoiceResult(); }, 15000);
+    }
+
+    document.getElementById('lastUpdate').textContent = 'Last update: ' + new Date().toTimeString().slice(0,8);
+  }
+
+  function clearVoiceText() {
+    var el = document.getElementById('voiceUser');
+    el.textContent = '"자비스야"라고 불러주세요';
+    el.classList.add('placeholder');
+    el.style.color = '';
+    var mb = document.getElementById('micBtn');
+    if (mb) mb.classList.remove('active');
+  }
+  function clearVoiceResult() {
+    var el = document.getElementById('voiceResult');
+    el.textContent = '—';
+    el.classList.add('empty');
+    el.style.color = '';
+    var mb = document.getElementById('micBtn');
+    if (mb) mb.classList.remove('active');
+  }
+
+  // ════════════════════════════════════════════
+  // UI helpers
+  // ════════════════════════════════════════════
+  function toggleEl(el){ el.classList.toggle('on'); }
+  function ct(l,on,cls,room,ctrl){
+    var oc = (room && ctrl) ? 'onclick="handleToggle(this,\''+room+'\',\''+ctrl+'\')"' : 'onclick="toggleEl(this)"';
+    return '<div class="toggle-row"><span class="toggle-label">'+l+'</span><div class="toggle-track '+(on?'on ':'')+(cls||'')+'" data-room="'+(room||'')+'" data-ctrl="'+(ctrl||'')+'" '+oc+'><div class="toggle-thumb"></div></div></div>';
+  }
+  function ib(c){ var m={violet:'rgba(139,92,246,0.2)',sky:'rgba(56,189,248,0.2)',rose:'rgba(244,114,182,0.2)',emerald:'rgba(52,211,153,0.2)'}; return m[c]||m.violet; }
+
+  // PIR mode
+  var PIR_MODES = { '외출':'away_mode','귀가':'home_mode','취침':'sleep_mode','기상':'wake_mode','방해금지':'dnd_mode' };
+  var PIR_MODE_LABELS = { 'away_mode':'외출','home_mode':'귀가','sleep_mode':'취침','wake_mode':'기상','dnd_mode':'방해금지' };
+  function updatePirUI(mode) {
+    if (!mode || !PIR_MODE_LABELS[mode]) return;
+    var label = PIR_MODE_LABELS[mode] + ' 모드';
+    document.querySelectorAll('.mode-btn').forEach(function(b){
+      b.classList.toggle('active', b.textContent.trim() === PIR_MODE_LABELS[mode]);
+    });
+    document.querySelectorAll('.pir-status-text').forEach(function(st){
+      st.textContent = label + ' | 센서 정상';
+    });
+    var md = document.getElementById('monitorPirModeDisplay');
+    if (md) md.textContent = label;
+    var mst = document.getElementById('monitorPirStatusText');
+    if (mst) mst.textContent = label + ' | 센서 정상';
+  }
+  window.setMode = function(btn) {
+    var mode = PIR_MODES[btn.textContent.trim()];
+    if (!mode) return;
+    document.querySelectorAll('.mode-btn').forEach(function(b){
+      b.classList.toggle('active', b.textContent.trim() === btn.textContent.trim());
+    });
+    sendCmd({ cmd: mode }); log('PIR 모드: ' + btn.textContent.trim(), 'info');
+  };
+
+  window.adjustTemp = function(d) {
+    var el = document.querySelector('.target-temp');
+    if (!el) return;
+    var v = parseFloat(el.textContent) || 20;
+    v = Math.round((v + d) * 10) / 10;
+    v = Math.max(15, Math.min(35, v));
+    document.querySelectorAll('.target-temp').forEach(function(e){ e.textContent = v.toFixed(1) + '°C'; });
+    setBathroomTemp(v);
+  };
+
+  // Manual input & voice
+  function sendVoiceText(text) {
+    sendWS({ type: 'voice_text', text: text });
+    log('🎙️ "' + text + '"', 'info');
+  }
+
+  document.getElementById('sendBtn').addEventListener('click', function() {
+    var inp = document.getElementById('manualInput');
+    var text = inp.value.trim();
+    if (!text) return;
+    window._lastSttText = text;
+    document.getElementById('voiceUser').textContent = text;
+    document.getElementById('voiceUser').classList.remove('placeholder');
+    document.getElementById('voiceUser').style.color = '';
+    document.getElementById('voiceResult').textContent = '🔄 처리 중...';
+    document.getElementById('voiceResult').classList.remove('empty');
+    document.getElementById('voiceResult').style.color = 'var(--sky)';
+    sendVoiceText(text);
+    inp.value = '';
+  });
+  document.getElementById('manualInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') document.getElementById('sendBtn').click(); });
+
+  // Mic button: activate server STT
+  document.getElementById('micBtn').addEventListener('click', function() {
+    this.classList.toggle('active');
+    if (this.classList.contains('active')) {
+      sendWS({ type: 'manual_trigger' });
+      fetch('/stt/activate', { method: 'POST' }).catch(function(){});
+      log('🎙️ 마이크 활성화 — 명령을 말씀하세요', 'info');
+    }
+  });
+
+  // Camera
+  var CAM_STREAM_URL = '/camera/entrance/stream';
+  var CAM_SNAPSHOT_URL = '/camera/entrance/snapshot';
+  var _camStreaming = false;
+
+  function toggleCamStream() {
+    _camStreaming = !_camStreaming;
+    var img = document.getElementById('monitorCamImg');
+    var ph = document.getElementById('monitorCamPlaceholder');
+    var lb = document.getElementById('monitorLiveBadge');
+    var ccImg = document.getElementById('ccCamImg');
+    var ccPh = document.getElementById('ccCamPlaceholder');
+    if (_camStreaming) {
+      var url = CAM_STREAM_URL + '?' + Date.now();
+      if (img) { img.src = url; img.style.display = 'block'; }
+      if (ph) ph.style.display = 'none';
+      if (lb) lb.style.display = 'inline-block';
+      if (ccImg) { ccImg.src = url; ccImg.style.display = 'block'; }
+      if (ccPh) ccPh.style.display = 'none';
+    } else {
+      if (img) { img.src = ''; img.style.display = 'none'; }
+      if (ph) ph.style.display = 'inline';
+      if (lb) lb.style.display = 'none';
+      if (ccImg) { ccImg.src = ''; ccImg.style.display = 'none'; }
+      if (ccPh) ccPh.style.display = 'inline';
+    }
+  }
+
+  document.getElementById('monitorStreamBtn').addEventListener('click', toggleCamStream);
+  document.getElementById('ccStreamBtn').addEventListener('click', toggleCamStream);
+
+  function doSnapshot() {
+    var url = CAM_SNAPSHOT_URL + '?' + Date.now();
+    fetch(url).then(function(r) {
+      if (!r.ok) { log('스냅샷 실패', 'fail'); return; }
+      return r.blob();
+    }).then(function(blob) {
+      if (!blob) return;
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'entrance_' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.jpg';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      log('📸 스냅샷 저장됨', 'ok');
+    }).catch(function(){ log('스냅샷 실패', 'fail'); });
+  }
+
+  document.getElementById('monitorSnapshotBtn').addEventListener('click', doSnapshot);
+  document.getElementById('ccSnapshotBtn').addEventListener('click', doSnapshot);
+
+  document.getElementById('monitorAuthBtn').addEventListener('click', function(){ log('Auth: SmartGate 인증 (대시보드 참조)', 'info'); });
+  document.getElementById('monitorFaceBtn').addEventListener('click', function(){ log('Face: 얼굴 등록 (대시보드 참조)', 'info'); });
+  document.getElementById('ccAuthBtn').addEventListener('click', function(){ log('Auth: SmartGate 인증', 'info'); });
+  document.getElementById('ccFaceBtn').addEventListener('click', function(){ log('Face: 얼굴 등록', 'info'); });
+
+  // ════════════════════════════════════════════
+  // BT 스피커 음악 제어
+  // ════════════════════════════════════════════
+  var _musicStartTime = 0;
+  var _musicDuration = 180;
+  var _musicTimer = null;
+
+  async function _btSpFetch(path, opts) {
+    opts = opts || {};
+    var headers = Object.assign({}, getAuthHeaders(), opts.headers || {});
+    try {
+      var res = await fetch(path, { method: opts.method || 'GET', headers: headers, body: opts.body });
+      if (!res.ok) {
+        if (res.status === 401) log('BT 스피커: 로그인이 필요합니다', 'warn');
+        else if (res.status === 503) log('BT 스피커: 서버 미설정 (BT_SPEAKER_URL)', 'warn');
+        else log('BT 스피커 요청 실패: ' + res.status, 'fail');
+        return null;
+      }
+      return await res.json();
+    } catch (e) {
+      console.warn('[BT-SP]', path, e);
+      log('BT 스피커 연결 실패', 'fail');
+      return null;
+    }
+  }
+
+  function _fmtTime(s) {
+    var m = Math.floor(s / 60);
+    var sec = Math.floor(s % 60);
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+  }
+
+  function _updateMusicProgress() {
+    if (!_musicStartTime) return;
+    var elapsed = Math.floor((Date.now() - _musicStartTime) / 1000);
+    if (elapsed >= _musicDuration) {
+      _musicStartTime = 0;
+      clearInterval(_musicTimer);
+      _musicTimer = null;
+    }
+    var pct = _musicDuration > 0 ? (elapsed / _musicDuration) * 100 : 0;
+    document.querySelectorAll('.btSpTimeCur').forEach(function(el){ el.textContent = _fmtTime(elapsed); });
+    document.querySelectorAll('.btSpTimeDur').forEach(function(el){ el.textContent = '/ ' + _fmtTime(_musicDuration); });
+    document.querySelectorAll('.btSpProgressBar').forEach(function(el){ el.style.width = pct + '%'; });
+  }
+
+  async function btSpFetchStatus() {
+    var d = await _btSpFetch('/bt-speaker/status');
+    window._btSpLastStatus = d;
+    var trackName = document.querySelector('.btSpTrackName');
+    if (!d) {
+      if (trackName) trackName.textContent = '연결 안됨';
+      _musicStartTime = 0;
+      if (_musicTimer) { clearInterval(_musicTimer); _musicTimer = null; }
+      return;
+    }
+    var title = d.current_title || d.title || (d.streaming ? '재생 중' : '대기 중');
+    document.querySelectorAll('.btSpTrackName').forEach(function(el){ el.textContent = title; });
+
+    var playBtn = document.querySelector('.btSpPlayBtn');
+    if (playBtn) {
+      playBtn.textContent = d.streaming ? '⏹' : '▶';
+      playBtn.title = d.streaming ? '정지' : '재생';
+    }
+
+    if (d.streaming) {
+      if (!_musicStartTime) {
+        _musicStartTime = Date.now();
+        if (!_musicTimer) _musicTimer = setInterval(_updateMusicProgress, 1000);
+      }
+      _updateMusicProgress();
+    } else {
+      _musicStartTime = 0;
+      if (_musicTimer) { clearInterval(_musicTimer); _musicTimer = null; }
+      document.querySelectorAll('.btSpTimeCur').forEach(function(el){ el.textContent = '0:00'; });
+      document.querySelectorAll('.btSpTimeDur').forEach(function(el){ el.textContent = '/ ' + _fmtTime(_musicDuration); });
+      document.querySelectorAll('.btSpProgressBar').forEach(function(el){ el.style.width = '0%'; });
+    }
+
+    if (d.volume !== undefined) {
+      var volEl = document.querySelector('.btSpVol');
+      if (volEl && document.activeElement !== volEl) { volEl.value = d.volume; }
+      document.querySelectorAll('.btSpVolVal').forEach(function(el){ el.textContent = d.volume + '%'; });
+    }
+  }
+
+  function _esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+  async function btSpLoadPl() {
+    var d = await _btSpFetch('/bt-speaker/playlist');
+    var els = document.querySelectorAll('.btSpPlaylist');
+    if (!els.length) return;
+    var titles = d && (d.titles || d.playlist || []);
+    var emptyHtml = '<div style="color:#64748b;font-size:0.7rem;text-align:center;padding:8px;">플레이리스트 비어 있음</div>';
+    if (!titles || titles.length === 0) {
+      els.forEach(function(el){ el.innerHTML = emptyHtml; });
+      return;
+    }
+    var cur = d && d.current !== undefined ? d.current : -1;
+    var html = titles.map(function(t, i) {
+      var name = typeof t === 'string' ? t : (t.title || t.url || '트랙 ' + (i + 1));
+      var active = cur === i ? ' active' : '';
+      var upBtn = i > 0 ? '<button class="pl-btn btSpPlUp" data-idx="' + i + '" type="button" title="위로">▲</button>' : '';
+      var dnBtn = i < titles.length - 1 ? '<button class="pl-btn btSpPlDown" data-idx="' + i + '" type="button" title="아래로">▼</button>' : '';
+      return '<div class="playlist-item' + active + '" data-idx="' + i + '"><span style="width:14px;text-align:center;font-size:0.65rem">' + (i + 1) + '</span><span class="pl-title">' + _esc(name) + '</span><div class="pl-ctrl">' + upBtn + dnBtn + '<button class="pl-btn btSpPlDel" data-idx="' + i + '" type="button" title="삭제">✕</button></div></div>';
+    }).join('');
+    els.forEach(function(el){ el.innerHTML = html; });
+  }
+
+  async function btSpAddPl() {
+    var inp = document.querySelector('.tab-panel.active .btSpUrl') || document.querySelector('.btSpUrl');
+    if (!inp) return;
+    var url = inp.value.trim();
+    if (!url) { _btSpMsg('URL을 입력하세요'); return; }
+    _btSpMsg('제목 조회 중...');
+    var titRes = await _btSpFetch('/bt-speaker/youtube-title?url=' + encodeURIComponent(url));
+    var title = (titRes && titRes.title && !titRes.error) ? titRes.title : url;
+    _btSpMsg('추가 중...');
+    var body = 'url=' + encodeURIComponent(url) + '&title=' + encodeURIComponent(title);
+    var d = await _btSpFetch('/bt-speaker/playlist/add', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+    if (d && !d.error) { _btSpMsg('추가 완료: ' + title.substring(0,20)); inp.value = ''; log('🔊 플레이리스트 추가: ' + title, 'info'); setTimeout(btSpLoadPl, 300); }
+    else { _btSpMsg(d && d.error ? d.error : '추가 실패'); }
+  }
+
+  async function btSpDelPl(idx) {
+    await _btSpFetch('/bt-speaker/playlist/del', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'idx=' + idx });
+    btSpLoadPl();
+  }
+
+  async function btSpMovePl(fromIdx, toIdx) {
+    var body = 'from=' + fromIdx + '&to=' + toIdx;
+    await _btSpFetch('/bt-speaker/playlist/move', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+    btSpLoadPl();
+  }
+
+  async function btSpClearPl() {
+    await _btSpFetch('/bt-speaker/playlist/clear', { method: 'POST' });
+    log('🔊 플레이리스트 초기화', 'info');
+    btSpLoadPl();
+  }
+
+  function _btSpMsg(msg) {
+    document.querySelectorAll('.btSpMsg').forEach(function(el){ el.textContent = msg || ''; });
+  }
+
+  document.addEventListener('click', function(e) {
+    var wrap = e.target.closest('.btSpProgressWrap');
+    if (!wrap) return;
+    var rect = wrap.getBoundingClientRect();
+    var pct = (e.clientX - rect.left) / rect.width;
+    pct = Math.max(0, Math.min(1, pct));
+    var sec = Math.floor(pct * _musicDuration);
+    _musicStartTime = Date.now() - sec * 1000;
+    _updateMusicProgress();
+    var st = window._btSpLastStatus;
+    if (st && st.streaming && st.track >= 0) {
+      _btSpFetch('/bt-speaker/play', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'idx=' + st.track });
+      log('🔄 곡 재시작 (seek 미지원)', 'info');
+    }
+  });
+
+  async function btSpNav(dir) {
+    var path = dir === 'prev' ? '/bt-speaker/prev' : '/bt-speaker/next';
+    await _btSpFetch(path, { method: 'POST' });
+    log('🔊 ' + (dir === 'prev' ? '이전' : '다음') + ' 곡', 'info');
+    setTimeout(btSpFetchStatus, 500);
+    setTimeout(btSpLoadPl, 500);
+  }
+
+  async function btSpTogglePlay() {
+    var st = await _btSpFetch('/bt-speaker/status');
+    window._btSpLastStatus = st;
+    if (!st) {
+      log('🔊 BT 스피커 연결 실패', 'fail');
+      return;
+    }
+    if (st.streaming) {
+      await _btSpFetch('/bt-speaker/stop', { method: 'POST' });
+      log('🔊 정지', 'info');
+    } else {
+      var pl = await _btSpFetch('/bt-speaker/playlist');
+      var cnt = (pl && (pl.titles || pl.playlist || [])).length;
+      if (cnt === 0) {
+        log('🔊 플레이리스트가 비어 있습니다. 곡을 추가한 후 재생하세요.', 'warn');
+        return;
+      }
+      var idx = (st.track >= 0 && st.track < cnt) ? st.track : 0;
+      var body = 'idx=' + idx;
+      var ok = await _btSpFetch('/bt-speaker/play', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+      if (ok && !ok.error) log('🔊 재생: 트랙 ' + (idx + 1), 'info');
+      else if (ok && ok.error) log('🔊 ' + (ok.error || '재생 실패'), 'fail');
+    }
+    setTimeout(btSpFetchStatus, 500);
+    setTimeout(btSpLoadPl, 500);
+  }
+
+  async function btSpPlay(idx) {
+    var body = 'idx=' + idx;
+    await _btSpFetch('/bt-speaker/play', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+    log('🔊 재생: 트랙 ' + (idx + 1), 'info');
+    setTimeout(btSpFetchStatus, 500);
+    setTimeout(btSpLoadPl, 500);
+  }
+
+  var _btSpVolTimer = null;
+  function btSpSetVol(val) {
+    document.querySelectorAll('.btSpVolVal').forEach(function(el){ el.textContent = val + '%'; });
+    clearTimeout(_btSpVolTimer);
+    _btSpVolTimer = setTimeout(async function() {
+      await _btSpFetch('/bt-speaker/volume', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'v=' + val });
+    }, 300);
+  }
+
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.btSpPrevBtn');
+    if (btn) { btSpNav('prev'); return; }
+    btn = e.target.closest('.btSpNextBtn');
+    if (btn) { btSpNav('next'); return; }
+    btn = e.target.closest('.btSpPlayBtn');
+    if (btn) { btSpTogglePlay(); return; }
+    btn = e.target.closest('.btSpAddBtn');
+    if (btn) { btSpAddPl(); return; }
+    btn = e.target.closest('.btSpClearBtn');
+    if (btn) { btSpClearPl(); return; }
+    var delBtn = e.target.closest('.btSpPlDel');
+    if (delBtn) { btSpDelPl(parseInt(delBtn.dataset.idx, 10)); return; }
+    var upBtn = e.target.closest('.btSpPlUp');
+    if (upBtn) { btSpMovePl(parseInt(upBtn.dataset.idx, 10), parseInt(upBtn.dataset.idx, 10) - 1); return; }
+    var dnBtn = e.target.closest('.btSpPlDown');
+    if (dnBtn) { btSpMovePl(parseInt(dnBtn.dataset.idx, 10), parseInt(dnBtn.dataset.idx, 10) + 1); return; }
+    var pli = e.target.closest('.playlist-item .pl-title');
+    if (pli) { var row = pli.closest('.playlist-item[data-idx]'); if (row) btSpPlay(parseInt(row.dataset.idx, 10)); return; }
+    pli = e.target.closest('.playlist-item[data-idx]');
+    if (pli && !e.target.closest('.pl-ctrl')) { btSpPlay(parseInt(pli.dataset.idx, 10)); }
+  });
+
+  document.addEventListener('input', function(e) {
+    if (e.target.classList.contains('btSpVol')) btSpSetVol(e.target.value);
+  });
+
+  function handleMusicControl(action, value) {
+    if (action === 'play') btSpTogglePlay();
+    else if (action === 'pause' || action === 'stop') _btSpFetch('/bt-speaker/stop', { method: 'POST' }).then(function(){ setTimeout(btSpFetchStatus, 500); });
+    else if (action === 'next') btSpNav('next');
+    else if (action === 'prev') btSpNav('prev');
+    else if (action === 'volume' && value !== undefined) {
+      var v = Math.min(100, Math.max(0, parseInt(value)));
+      btSpSetVol(v);
+      document.querySelectorAll('.btSpVol').forEach(function(el){ el.value = v; });
+    }
+  }
+
+  // Devices
+  var devices = [
+    { room:'garage', title:'차고 Garage', icon:'🛣', color:'violet', glow:'glow-violet', body: ct('LED',false,'green','garage','led')+ct('차고문',false,'sky','garage','door') },
+    { room:'living', title:'거실 Living', icon:'🛋', color:'sky', glow:'glow-sky', body: ct('LED',false,'green','living','led') },
+    { room:'bedroom', title:'침실 Bedroom', icon:'🛌', color:'rose', glow:'glow-rose', body: ct('LED',false,'green','bedroom','led')+ct('커튼',false,'sky','bedroom','curtain') },
+    { room:'entrance', title:'현관 Entrance', icon:'🚪', color:'emerald', glow:'glow-emerald', body: ct('LED',false,'green','entrance','led')+ct('현관문',false,'violet','entrance','door') },
+    { room:'bathroom', title:'욕실 Bathroom', icon:'🛀', color:'sky', glow:'glow-sky', body: ct('LED',false,'green','bathroom','led')+ct('난방',false,'rose','bathroom','heating')+'<div class="temp-display"><div><div class="temp-value temp-bathroom">24.5°C</div><div class="temp-sub">Current</div></div><div class="temp-target">Target<br><strong class="target-temp">26.0°C</strong></div><div class="temp-btns"><button class="temp-btn" onclick="adjustTemp(-0.5)">−</button><button class="temp-btn" onclick="adjustTemp(0.5)">+</button></div></div>' },
+    { room:'pir', title:'PIR 보안', icon:'🛡', color:'rose', glow:'glow-rose', body:'<div class="mode-buttons"><button class="mode-btn" onclick="setMode(this)">외출</button><button class="mode-btn active" onclick="setMode(this)">귀가</button><button class="mode-btn" onclick="setMode(this)">취침</button><button class="mode-btn" onclick="setMode(this)">기상</button><button class="mode-btn" onclick="setMode(this)">방해금지</button></div><div class="status-pir"><span class="status-dot"></span><span class="pir-status-text">귀가 모드 | 센서 정상</span></div>' },
+    { room:'camera', title:'카메라', icon:'📹', color:'emerald', glow:'glow-emerald', body:'<div class="cam-ref"><span class="status-dot" style="display:inline-block;margin-right:6px"></span>ESP32-CAM 연결됨<br><a href="#" onclick="document.querySelector(\'[data-tab=monitor]\').click();return false">→ 모니터링 탭에서 보기</a></div>' },
+    { room:'speaker', title:'BT 스피커', icon:'🎵', color:'violet', glow:'glow-violet', body:'<div class="speaker-now">Now Playing</div><div class="speaker-title btSpTrackName">대기 중</div><div class="music-time"><span class="btSpTimeCur">0:00</span><span class="btSpTimeDur">/ 0:00</span></div><div class="music-progress-wrap btSpProgressWrap"><div class="music-progress-bar btSpProgressBar"></div></div><div class="play-controls"><button class="play-btn btSpPrevBtn" title="이전">⏮</button><button class="play-btn main-play btSpPlayBtn" title="재생/정지">▶</button><button class="play-btn btSpNextBtn" title="다음">⏭</button></div><div class="volume-row"><span>🔈</span><input type="range" class="btSpVol" min="0" max="100" value="65" title="볼륨"><span class="btSpVolVal">65%</span></div><div class="pl-add-row"><input type="text" class="btSpUrl" placeholder="YouTube URL" style="flex:1;padding:6px 8px;border-radius:6px;border:1px solid var(--glass-border);background:rgba(255,255,255,0.04);color:inherit;font-size:0.72rem;"><button class="btSpAddBtn" title="추가" style="padding:6px 10px;border-radius:6px;border:1px solid var(--violet);background:rgba(139,92,246,0.2);color:var(--violet);cursor:pointer;font-size:0.8rem;">+</button></div><div class="playlist-area btSpPlaylist"></div><div class="pl-actions"><button class="btSpClearBtn" style="font-size:0.65rem;padding:4px 8px;border-radius:6px;border:1px solid var(--glass-border);background:rgba(255,255,255,0.04);color:#94a3b8;cursor:pointer;">목록 초기화</button></div><div class="btSpMsg" style="font-size:0.65rem;color:var(--sky);min-height:14px;"></div>' }
+  ];
+
+  var grid = document.getElementById('deviceGrid');
+  devices.forEach(function(c) {
+    var d = document.createElement('div');
+    d.className = 'device-card glass ' + c.glow;
+    if (c.room && ['garage','living','bedroom','entrance','bathroom'].indexOf(c.room) >= 0) {
+      d.id = 'card-' + c.room;
+      d.innerHTML = '<div class="card-header"><div class="card-title"><div class="card-icon" style="background:'+ib(c.color)+'">'+c.icon+'</div>'+c.title+'</div><span class="badge-online" id="badge-'+c.room+'">OFFLINE</span></div>'+c.body;
+    } else {
+      d.innerHTML = '<div class="card-header"><div class="card-title"><div class="card-icon" style="background:'+ib(c.color)+'">'+c.icon+'</div>'+c.title+'</div><span class="badge-online">—</span></div>'+c.body;
+    }
+    grid.appendChild(d);
+  });
+
+  // Logs init
+  log('앱 시작 — WebSocket 연결 대기', 'info');
+
+  window.filterLogs = function(type, btn) {
+    document.querySelectorAll('.filter-btn').forEach(function(b){ b.classList.remove('active'); });
+    btn.classList.add('active');
+    document.querySelectorAll('.log-full-item').forEach(function(i){ i.style.display = (type === 'all' || i.dataset.type === type) ? 'flex' : 'none'; });
+  };
+
+  // Clock & drawMap
+  function tick() {
+    var t = new Date().toTimeString().slice(0,8);
+    document.getElementById('clock').textContent = t;
+    document.getElementById('lastUpdate').textContent = 'Last update: ' + t;
+    var cct = document.getElementById('ccCamTime');
+    if (cct) cct.textContent = t;
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  function drawMap(id) {
+    var c = document.getElementById(id);
+    if (!c || !c.clientWidth) return;
+    var dpr = window.devicePixelRatio || 1;
+    c.width = c.clientWidth * dpr;
+    c.height = c.clientHeight * dpr;
+    var ctx = c.getContext('2d');
+    ctx.scale(dpr, dpr);
+    var w = c.clientWidth, h = c.clientHeight, p = 14;
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(139,92,246,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.fillStyle = 'rgba(139,92,246,0.06)';
+    ctx.beginPath();
+    ctx.roundRect(p, p, w - p * 2, h - p * 2, 8);
+    ctx.fill();
+    ctx.stroke();
+    var iw = w - p * 2, ih = h - p * 2, my = p + ih * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(p, my);
+    ctx.lineTo(w - p, my);
+    ctx.stroke();
+    var c1 = p + iw * 0.35, c2 = p + iw * 0.65, c3 = p + iw * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(c1, p);
+    ctx.lineTo(c1, my);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(c2, p);
+    ctx.lineTo(c2, my);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(c3, my);
+    ctx.lineTo(c3, h - p);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(226,232,240,0.6)';
+    ctx.font = '500 11px Inter,sans-serif';
+    ctx.textAlign = 'center';
+    var labels = [['거실', p + iw * 0.175, p + (my - p) * 0.48], ['침실', p + iw * 0.5, p + (my - p) * 0.48], ['욕실', p + iw * 0.825, p + (my - p) * 0.48], ['현관', p + iw * 0.25, my + (h - p - my) * 0.48], ['차고', p + iw * 0.75, my + (h - p - my) * 0.48]];
+    labels.forEach(function(i) { ctx.fillText(i[0], i[1], i[2]); });
+    var colors = { living: house.living.led, bedroom: house.bedroom.led, bathroom: house.bathroom.led, entrance: house.entrance.led, garage: house.garage.led };
+    ctx.fillStyle = 'rgba(52,211,153,0.85)';
+    labels.forEach(function(i, idx) {
+      var roomId = ['living','bedroom','bathroom','entrance','garage'][idx];
+      var on = colors[roomId];
+      ctx.fillStyle = on ? 'rgba(52,211,153,0.9)' : 'rgba(100,116,139,0.5)';
+      ctx.beginPath();
+      ctx.arc(i[1], i[2] + 16, 4, 0, Math.PI * 2);
+      ctx.fill();
+      if (on) { ctx.save(); ctx.shadowColor = 'rgba(52,211,153,0.6)'; ctx.shadowBlur = 8; ctx.fill(); ctx.restore(); }
+    });
+  }
+
+  var ccLogList = document.getElementById('ccLogList');
+  if (ccLogList) {
+    ccLogList.addEventListener('scroll', function() {
+      var el = this;
+      window._ccAutoScroll = (el.scrollHeight - el.scrollTop - el.clientHeight < 25);
+    });
+  }
+  var ccGrid = document.getElementById('ccDeviceGrid');
+  devices.forEach(function(c) {
+    if (c.room === 'camera') return; // 카메라 섹션 제외 (Camera Feed로 통합)
+    var d = document.createElement('div');
+    d.className = 'device-card glass ' + c.glow;
+    if (c.room && ['garage','living','bedroom','entrance','bathroom'].indexOf(c.room) >= 0) {
+      d.id = 'card-cc-' + c.room;
+      d.innerHTML = '<div class="card-header"><div class="card-title"><div class="card-icon" style="background:'+ib(c.color)+'">'+c.icon+'</div>'+c.title+'</div><span class="badge-online" id="badge-cc-'+c.room+'">OFFLINE</span></div>'+c.body;
+    } else {
+      d.innerHTML = '<div class="card-header"><div class="card-title"><div class="card-icon" style="background:'+ib(c.color)+'">'+c.icon+'</div>'+c.title+'</div><span class="badge-online">—</span></div>'+c.body;
+    }
+    ccGrid.appendChild(d);
+  });
+
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+      this.classList.add('active');
+      var p = document.getElementById('tab-' + this.dataset.tab);
+      if (p) p.classList.add('active');
+      setTimeout(function() { drawMap('houseMap'); drawMap('houseMapMon'); drawMap('houseMapCC'); }, 50);
+    });
+  });
+
+  window.addEventListener('load', function() {
+    drawMap('houseMap');
+    drawMap('houseMapMon');
+    drawMap('houseMapCC');
+    document.getElementById('serverAddr').textContent = 'Server: ' + location.host;
+    connectWS();
+    setTimeout(function() {
+      btSpFetchStatus();
+      btSpLoadPl();
+    }, 1500);
+    setInterval(function(){ btSpFetchStatus(); btSpLoadPl(); }, 10000);
+  });
+  window.addEventListener('resize', function() { drawMap('houseMap'); drawMap('houseMapMon'); drawMap('houseMapCC'); });
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(function() {
+      drawMap('houseMap');
+      drawMap('houseMapMon');
+      drawMap('houseMapCC');
+      document.getElementById('serverAddr').textContent = 'Server: ' + location.host;
+      connectWS();
+    }, 50);
+  }
+})();
+</script>
+</body>
+</html>

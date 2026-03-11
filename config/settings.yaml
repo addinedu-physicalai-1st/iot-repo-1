@@ -85,7 +85,7 @@ stt:
   porcupine_model_path: "models/자비스야_ko_linux_v4_0_0.ppn"
   porcupine_params_path: "models/porcupine_params_ko.pv"
   # mic_device 미설정 시 시스템 기본 마이크 사용 (sounddevice default)
-  vad_energy_threshold: 0.02
+  vad_energy_threshold: 0.01   # 0.02 → 0.01 (자비스야 후 발화 감지 개선)
   noise_reduction: false
   noise_prop_decrease: 0.85
   debug_mode: true

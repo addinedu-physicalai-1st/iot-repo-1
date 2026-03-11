@@ -328,6 +328,67 @@ void handlePlaylistClear() {
     server.send(200, "application/json", "{\"count\":0}");
 }
 
+void handlePlaylistInsert() {
+    if (!server.hasArg("idx") || !server.hasArg("url")) {
+        server.send(400, "application/json", "{\"error\":\"idx and url required\"}");
+        return;
+    }
+    if (plCount >= MAX_PLAYLIST) {
+        server.send(400, "application/json", "{\"error\":\"playlist full\"}");
+        return;
+    }
+    int idx = server.arg("idx").toInt();
+    if (idx < 0) idx = 0;
+    if (idx > plCount) idx = plCount;
+    String url = server.arg("url");
+    String title = server.hasArg("title") ? server.arg("title") : url;
+    for (int i = plCount; i > idx; i--) {
+        playlist[i] = playlist[i - 1];
+        plTitles[i] = plTitles[i - 1];
+    }
+    playlist[idx] = url;
+    plTitles[idx] = title;
+    plCount++;
+    if (currentTrack >= idx) currentTrack++;
+    server.send(200, "application/json", "{\"count\":" + String(plCount) + "}");
+}
+
+void handlePlaylistMove() {
+    if (!server.hasArg("from") || !server.hasArg("to")) {
+        server.send(400, "application/json", "{\"error\":\"from and to required\"}");
+        return;
+    }
+    int fromIdx = server.arg("from").toInt();
+    int toIdx = server.arg("to").toInt();
+    if (fromIdx < 0 || fromIdx >= plCount || toIdx < 0 || toIdx >= plCount) {
+        server.send(400, "application/json", "{\"error\":\"invalid idx\"}");
+        return;
+    }
+    if (fromIdx == toIdx) {
+        server.send(200, "application/json", "{\"count\":" + String(plCount) + "}");
+        return;
+    }
+    String tmpUrl = playlist[fromIdx];
+    String tmpTitle = plTitles[fromIdx];
+    if (fromIdx < toIdx) {
+        for (int i = fromIdx; i < toIdx; i++) {
+            playlist[i] = playlist[i + 1];
+            plTitles[i] = plTitles[i + 1];
+        }
+    } else {
+        for (int i = fromIdx; i > toIdx; i--) {
+            playlist[i] = playlist[i - 1];
+            plTitles[i] = plTitles[i - 1];
+        }
+    }
+    playlist[toIdx] = tmpUrl;
+    plTitles[toIdx] = tmpTitle;
+    if (currentTrack == fromIdx) currentTrack = toIdx;
+    else if (fromIdx < toIdx && currentTrack > fromIdx && currentTrack <= toIdx) currentTrack--;
+    else if (fromIdx > toIdx && currentTrack >= toIdx && currentTrack < fromIdx) currentTrack++;
+    server.send(200, "application/json", "{\"count\":" + String(plCount) + "}");
+}
+
 void handlePlaylistGet() {
     String json = "{\"count\":" + String(plCount) + ",\"current\":" + String(currentTrack) + ",\"titles\":[";
     for (int i = 0; i < plCount; i++) {
@@ -490,7 +551,9 @@ void setup() {
     server.on("/status", HTTP_GET, handleStatus);
     server.on("/playlist", HTTP_GET, handlePlaylistGet);
     server.on("/playlist/add", HTTP_POST, handlePlaylistAdd);
+    server.on("/playlist/insert", HTTP_POST, handlePlaylistInsert);
     server.on("/playlist/del", HTTP_POST, handlePlaylistDel);
+    server.on("/playlist/move", HTTP_POST, handlePlaylistMove);
     server.on("/playlist/clear", HTTP_POST, handlePlaylistClear);
     server.on("/bt-connect", HTTP_POST, handleBtConnect);
     server.on("/bt-disconnect", HTTP_POST, handleBtDisconnect);

@@ -357,6 +357,16 @@ def create_app() -> FastAPI:
     ws_hub._on_message = command_router.handle
     ws_hub.db_logger = db_logger
 
+    # ── PIR 모드 초기 동기화 (접속 시 현재 모드 즉시 전송) ──
+    import json as _json
+    _orig_connect = ws_hub._on_connect
+    async def _wrap_ws_connect(cid, send_fn):
+        await _orig_connect(cid, send_fn)
+        pir = command_router._current_pir_mode if command_router else None
+        if pir:
+            await send_fn(_json.dumps({"type": "pir_mode", "mode": pir}, ensure_ascii=False))
+    ws_hub._on_connect = _wrap_ws_connect
+
     # ════════════════════════════════════════════
     # 3. lifespan
     # ════════════════════════════════════════════
@@ -743,10 +753,10 @@ def _make_stt_callback(
     async def on_stt_result(text: str):
         import time
 
-        # TTS 재생 중 마이크 수음 방지 — 루프 차단
+        # TTS 재생 중 새 명령 수신 → 기존 TTS 중단 후 새 명령 처리
         if tts_engine and tts_engine.is_speaking:
-            logger.info(f"[STT] TTS 재생 중 — 입력 무시: '{text[:30]}'")
-            return
+            logger.info(f"[STT] TTS 재생 중 — 새 명령으로 전환: '{text[:30]}'")
+            tts_engine.stop()
 
         logger.info(f"[Pipeline] STT → '{text}'")
 
@@ -755,9 +765,10 @@ def _make_stt_callback(
             db_logger.log("voice_input", "stt_engine", f"STT 인식: '{text}'",
                           detail={"text": text, "source": "stt_engine"})
 
-        # WS 브로드캐스트: 인식된 텍스트 전달
+        # WS 브로드캐스트: 인식된 텍스트 전달 (JSON 이스케이프 처리)
+        import json as _json
         await ws_hub.broadcast(
-            f'{{"type":"stt_result","text":"{text}"}}'
+            _json.dumps({"type": "stt_result", "text": text}, ensure_ascii=False)
         )
 
         # CommandRouter → LLM 파싱 → ESP32 전송
