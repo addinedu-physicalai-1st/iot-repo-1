@@ -1,27 +1,49 @@
 import socket
+import hmac
+import hashlib
+import time
 
-# 해커가 미리 가로채둔 '어제의 성공 패킷' (예시 데이터)
-# 실제 시연 시에는 정상 클라이언트가 보낸 패킷을 복사해서 넣으시면 됩니다.
-STOLEN_PACKET = b'\x02' + b'\x0a' + b'1234' + b'\x00\r' + b'FACE_DETECTED' + b'FAKE_SIGNATURE_STOLEN' + b'\x03'
+HOST = '127.0.0.1'
+PORT = 8080
+# 🌟 해커가 과거의 통신 기록을 통째로 훔쳤다고 가정 (서버와 동일한 키로 완벽한 도장 생성)
+SECRET_KEY = b'My_Super_Secret_Doorlock_Key_777' 
 
-def replay_attack():
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect(('127.0.0.1', 8080))
-    
-    # 서버가 주는 새 마패(Nonce)는 무시하고, 가로챈 옛날 패킷을 그냥 쏴버림
-    client_socket.recv(1024) 
-    print("😈 [해커] 접속중 ...")
-    client_socket.sendall(STOLEN_PACKET)
+print("😈 [해커] 재전송 공격(Replay Attack) 시퀀스 개시...")
+print("😈 [해커] 과거에 탈취한 '완벽한 인증 패킷'을 장전합니다.\n")
 
-    # 서버 응답 수신
-    response = client_socket.recv(1024)
-    
-    # 🌟 추가된 부분: 응답 결과에 따른 메시지 출력
-    if response == b'\x02\x00\x03':
-        print("🚩 [서버 응답]: 인증 실패! (재전송된 데이터는 사용할 수 없습니다.)")
-    else:
-        print(f"🚩 [서버 응답]: {response}")
-
-    client_socket.close()
-
-replay_attack()
+while True:
+    try:
+        # 1. 서버 접속
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((HOST, PORT))
+        
+        # 2. 서버가 현재 발급하는 새 마패(Nonce) 수신 
+        # (해커는 이거 무시합니다. 어차피 훔쳐둔 옛날 패킷을 통째로 쏠 거니까요!)
+        server_hello = client_socket.recv(1024)
+        
+        # 3. 완벽하게 조작된 옛날 패킷 만들기 (과거의 마패 '1111' 사용)
+        old_nonce = b'1111'
+        cmd = b'\x01' # 문 열어!
+        data = b'Open_The_Door'
+        data_len = len(data).to_bytes(2, byteorder='big')
+        
+        payload = cmd + old_nonce + data_len + data
+        # 🌟 서버의 1차 관문을 완벽하게 통과하기 위해 진짜 도장을 찍음
+        signature = hmac.new(SECRET_KEY, payload, hashlib.sha256).digest() 
+        
+        fake_packet = b'\x02' + payload + signature + b'\x03'
+        
+        # 4. 공격!
+        client_socket.sendall(fake_packet)
+        
+        # 5. 결과 확인
+        response = client_socket.recv(1024)
+        if response == b'\x02\x00\x03':
+            print("🚩 [서버 응답]: 인증 실패! (서버가 재전송 공격을 눈치채고 차단했습니다.)")
+        
+        client_socket.close()
+        time.sleep(1.5) # 영상에서 잘 보이게 1.5초마다 한 번씩 툭툭 던짐
+        
+    except Exception as e:
+        print(f"오류: {e}")
+        time.sleep(1.5)

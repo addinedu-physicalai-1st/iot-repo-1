@@ -6,7 +6,7 @@ import sys
 def brute_force_attack():
     target_host = '127.0.0.1'
     target_port = 8080
-    attempt_count = 1000000 
+    attempt_count = 10000 
 
     print(f"😈 [해커] 무차별 대입 공격(Brute-force) 시퀀스 개시...")
     print("-" * 60)
@@ -34,7 +34,7 @@ def brute_force_attack():
 
         # 🌟 핵심 해결책: 출력 코드를 try-except 밖으로 뺐습니다! 
         # 이제 통신 성공/실패 여부와 상관없이 무조건 1000번마다 화면에 찍힙니다.
-        if i % 1000 == 0:
+        if i % 1 == 0:
             print(f"🔥 [공격 진행] {i:5d} / {attempt_count} 회차 돌파 시도 중... (모두 차단됨)", flush=True)
             time.sleep(0.4) # 발표용 시각 효과 (0.4초 대기)
 
