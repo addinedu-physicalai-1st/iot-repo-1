@@ -12,7 +12,7 @@
  * 공간별 핀 배정 (활성):
  *   거실  (living)   : LED GPIO 2
  *   욕실  (bathroom) : LED GPIO 4
- *   침실  (bedroom)  : LED GPIO 5
+ *   침실  (bedroom)  : Stepper GPIO 5, 18, 19, 21 (커튼)
  *   차고  (garage)   : LED GPIO 12 / Servo GPIO 15
  *   현관  (entrance) : LED GPIO 13 / Servo GPIO 16
  *   PIR               : GPIO 27
@@ -73,9 +73,15 @@
 // ── LED (공간별) ──────────────────────────────────────────────────
 #define PIN_LED_LIVING    12
 #define PIN_LED_BATHROOM  26
-#define PIN_LED_BEDROOM   14
+#define PIN_LED_BEDROOM   14  // 침실 LED 비활성 (커튼 스텝모터와 핀 간섭 가능성 대비)
 #define PIN_LED_GARAGE    13
 #define PIN_LED_ENTRANCE  25
+
+// ── 스텝모터 (침실 커튼) ──────────────────────────────────────
+#define PIN_SP_IN1   5
+#define PIN_SP_IN2   18
+#define PIN_SP_IN3   19
+#define PIN_SP_IN4   21
 
 // ── 서보 (공간별) ─────────────────────────────────────────────────
 //#define PIN_SERVO_BEDROOM   14   // 커튼
@@ -108,6 +114,24 @@ WiFiClient tcpClient;
 //Servo servoBedroom;
 Servo servoGarage;
 Servo servoEntrance;
+
+// ── 스텝모터 상태 변수 (침실 커튼) ──────────────────────────────────
+#define SP_TARGET_STEPS  7026
+#define SP_BACKLASH      50
+#define SP_DELAY_US      1200
+
+bool spRunning    = false;
+bool spDirCW      = true;     // 토글 방향
+long spStepsDone  = 0;
+long spTarget     = 0;
+int  spSeqIdx     = 0;
+unsigned long spLastStepUs = 0;
+
+// 하프스텝 시퀀스 (8단계)
+const byte SP_SEQ[8][4] = {
+  {1, 0, 0, 0}, {1, 1, 0, 0}, {0, 1, 0, 0}, {0, 1, 1, 0},
+  {0, 0, 1, 0}, {0, 0, 1, 1}, {0, 0, 0, 1}, {1, 0, 0, 1}
+};
 
 //TM1637Display seg7(PIN_SEG7_CLK, PIN_SEG7_DIO);
 
@@ -147,11 +171,6 @@ void setup() {
   servoEntrance.write(0);
   Serial.println("[SERVO] 2개 초기화 완료 (차고/현관)");
 
-  // ── TM1637 초기화 ────────────────────────────────────────────
-  // seg7.setBrightness(5);
-  // seg7.showNumberDec(0);
-  // Serial.println("[SEG7] 초기화 완료 (욕실)");
-
   // ── PIR 초기화 ───────────────────────────────────────────────
   pinMode(PIN_PIR, INPUT);
   lastMotionTime = millis();
@@ -160,6 +179,14 @@ void setup() {
   // 첫 감지 즉시 발동 보장: 쿨다운이 이미 지난 것으로 설정
   lastAlertTime = millis() - PIR_ALERT_COOLDOWN_MS;
   Serial.println("[PIR] 준비 완료");
+
+  // ── 스텝모터 초기화 (침실 커튼) ──────────────────────────────
+  pinMode(PIN_SP_IN1, OUTPUT);
+  pinMode(PIN_SP_IN2, OUTPUT);
+  pinMode(PIN_SP_IN3, OUTPUT);
+  pinMode(PIN_SP_IN4, OUTPUT);
+  releaseStepper();
+  Serial.println("[STEPPER] 침실 커튼 초기화 완료 (GPIO 5, 18, 19, 21)");
 
   connectWiFi();
   connectServer();
@@ -190,6 +217,9 @@ void loop() {
 
   // PIR 감지 처리
   handlePir();
+
+  // ── 스텝모터 틱 (비차단형) ──────────────────────────────────
+  updateStepper();
 }
 
 
@@ -342,12 +372,23 @@ void processCommand(String raw) {
 
   // ── SERVO ─────────────────────────────────────────────────────
   } else if (strcmp(cmd, "servo") == 0) {
-    Servo* sv = resolveServo(room);
-    if (!sv) { sendError("unknown room for servo"); return; }
-    int angle = doc["angle"] | 0;
-    angle = constrain(angle, 0, 180);
-    cmdServo(sv, angle, room);
-    sendAck("servo", "ok");
+    if (strcmp(room, "bedroom") == 0) {
+      if (!spRunning) {
+        spRunning   = true;
+        spStepsDone = 0;
+        spTarget    = SP_TARGET_STEPS + SP_BACKLASH;
+        Serial.printf("[STEPPER] 커튼 이동 시작 (방향: %s, 목표: %ld)\n", 
+                      spDirCW ? "CW" : "CCW", spTarget);
+      }
+      sendAck("servo", "ok");
+    } else {
+      Servo* sv = resolveServo(room);
+      if (!sv) { sendError("unknown room for servo"); return; }
+      int angle = doc["angle"] | 0;
+      angle = constrain(angle, 0, 180);
+      cmdServo(sv, angle, room);
+      sendAck("servo", "ok");
+    }
 
   // ── SEG7 ──────────────────────────────────────────────────────
   // } else if (strcmp(cmd, "seg7") == 0) {
@@ -487,6 +528,45 @@ void sendPirEvent(const char* eventType, const char* detail) {
 // ================================================================
 // 디바이스 제어 함수
 // ================================================================
+
+// ================================================================
+// 스텝모터 제어 헬퍼
+// ================================================================
+
+void writeStepperStep(int idx) {
+  digitalWrite(PIN_SP_IN1, SP_SEQ[idx][0]);
+  digitalWrite(PIN_SP_IN2, SP_SEQ[idx][1]);
+  digitalWrite(PIN_SP_IN3, SP_SEQ[idx][2]);
+  digitalWrite(PIN_SP_IN4, SP_SEQ[idx][3]);
+}
+
+void releaseStepper() {
+  digitalWrite(PIN_SP_IN1, LOW); digitalWrite(PIN_SP_IN2, LOW);
+  digitalWrite(PIN_SP_IN3, LOW); digitalWrite(PIN_SP_IN4, LOW);
+}
+
+void updateStepper() {
+  if (!spRunning) return;
+
+  unsigned long now = micros();
+  if (now - spLastStepUs >= SP_DELAY_US) {
+    spLastStepUs = now;
+
+    writeStepperStep(spSeqIdx);
+    
+    if (spDirCW) spSeqIdx = (spSeqIdx + 1) % 8;
+    else         spSeqIdx = (spSeqIdx + 7) % 8;
+
+    spStepsDone++;
+
+    if (spStepsDone >= spTarget) {
+      spRunning = false;
+      releaseStepper();
+      spDirCW = !spDirCW; // 방향 반전
+      Serial.println("[STEPPER] 이동 완료 및 자동 정지");
+    }
+  }
+}
 
 void cmdLed(int pin, bool on, const char* room) {
   digitalWrite(pin, on ? HIGH : LOW);
