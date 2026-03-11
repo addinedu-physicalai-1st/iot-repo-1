@@ -231,9 +231,18 @@ class SmartGateManager:
                 "state": self._state.name,
             }
 
+        # 쿨다운 중이면 재인증 차단 (브루트포스 방지)
+        now = time.time()
+        if now < self._auth_cooldown_until:
+            remaining = self._auth_cooldown_until - now
+            return {
+                "status": "fail",
+                "msg": f"인증 쿨다운 중 ({remaining:.0f}초 남음)",
+                "state": self._state.name,
+            }
+
         self._state = AuthState.ARMED
         self._armed_until = time.time() + self.ARM_TIMEOUT_SEC
-        self._auth_cooldown_until = 0.0   # ← 쿨다운 해제 (명시적 ARM이므로)
         self._fail_count = 0
         self._authenticated_user = ""
         self.liveness.reset()
@@ -586,7 +595,10 @@ class SmartGateManager:
                 level="ERROR",
             )
             # 잠금 이벤트 브로드캐스트
-            loop = getattr(self, '_loop', None) or asyncio.get_event_loop()
+            loop = getattr(self, '_loop', None)
+            if loop is None:
+                logger.warning("[SmartGate] _loop 미초기화 — lockout 브로드캐스트 스킵")
+                return
             asyncio.run_coroutine_threadsafe(
                 self._broadcast_event(
                     "lockout_start",

@@ -25,7 +25,6 @@ v1.1 변경:
 
 import logging
 import os
-import pickle
 import time
 from pathlib import Path
 from typing import Optional
@@ -140,12 +139,15 @@ class FrameAnalyzer:
 
         if cache_file is not None:
             try:
-                # HIGH-3: enc → face_store 복호화, pkl → pickle 직접 로드
+                # HIGH-3: enc → face_store 복호화, pkl → 재빌드로 전환
                 if cache_file.suffix == ".enc" and FACE_STORE_AVAILABLE:
                     raw = face_store.load_embeddings(str(cache_file))
+                elif cache_file.suffix == ".pkl":
+                    logger.warning("[FrameAnalyzer] 레거시 pkl 캐시 — pickle 직접 로드 차단, 재빌드")
+                    self._build_face_db()
+                    return
                 else:
-                    with open(cache_file, "rb") as f:
-                        raw = pickle.load(f)
+                    raw = None
 
                 if raw is None:
                     logger.warning("[FrameAnalyzer] 캐시 복호화 실패, 재생성")
@@ -163,8 +165,13 @@ class FrameAnalyzer:
                         user_embs.setdefault(name, []).append(emb)
                     self._known_db = []
                     for name, emb_list in user_embs.items():
+                        if not emb_list:
+                            continue
                         mean_emb = np.mean(emb_list, axis=0)
-                        mean_emb = mean_emb / np.linalg.norm(mean_emb)
+                        norm = np.linalg.norm(mean_emb)
+                        if norm == 0:
+                            continue
+                        mean_emb = mean_emb / norm
                         self._known_db.append({"name": name, "embedding": mean_emb})
                     unique = [e["name"] for e in self._known_db]
                     logger.info(
@@ -222,13 +229,11 @@ class FrameAnalyzer:
         self._known_db = db
         ENCODINGS_CACHE.parent.mkdir(parents=True, exist_ok=True)
 
-        # HIGH-3: 암호화 저장 (face_store), 실패 시 평문 pkl fallback
+        # HIGH-3: 암호화 저장 (face_store)
         if FACE_STORE_AVAILABLE:
             face_store.save_embeddings(db, str(ENCODINGS_CACHE))
         else:
-            with open(ENCODINGS_LEGACY, "wb") as f:
-                pickle.dump(db, f)
-            logger.warning("[FrameAnalyzer] ⚠️ 평문 pkl 저장 (face_store 없음)")
+            logger.warning("[FrameAnalyzer] face_store 없음 — 캐시 저장 스킵 (매 시작 시 재빌드)")
         logger.info(f"[FrameAnalyzer] 얼굴 DB 생성 완료: {len(db)}명")
 
     def rebuild_face_db(self):
@@ -251,6 +256,9 @@ class FrameAnalyzer:
         if self._external_face_auth is not None:
             fa = self._external_face_auth
             if fa.known_embeddings:
+                if len(fa.known_embeddings) != len(fa.known_names):
+                    logger.error("[FrameAnalyzer] embeddings/names 길이 불일치")
+                    return "unknown", 0.0
                 known_mat = np.array(fa.known_embeddings)  # (N, 512)
                 sims = np.dot(known_mat, embedding)
                 best_idx = int(np.argmax(sims))

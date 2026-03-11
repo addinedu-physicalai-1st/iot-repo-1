@@ -119,7 +119,7 @@ if [ -z "$DISABLE_DB" ]; then
         _DB_PASS="${DB_PASSWORD:-}"
         _DB_HOST="${DB_HOST:-localhost}"
         if [ -n "$_DB_USER" ] && [ -n "$_DB_PASS" ]; then
-            if mysql -u "$_DB_USER" -p"$_DB_PASS" -h "$_DB_HOST" -e "USE iot_smart_home;" 2>/dev/null; then
+            if MYSQL_PWD="$_DB_PASS" mysql -u "$_DB_USER" -h "$_DB_HOST" -e "USE iot_smart_home;" 2>/dev/null; then
                 echo "MySQL 연결 확인 완료 (iot_smart_home@${_DB_HOST})"
             else
                 echo "경고: MySQL 연결 실패 — DB 로깅이 자동 비활성화됩니다."
@@ -156,7 +156,7 @@ echo ""
 
 # ── YouTube → MP3 중계 서버 (relay_server) ──
 if [ -n "$RELAY_PORT" ]; then
-  if lsof -i :"$RELAY_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+  if command -v lsof &>/dev/null && lsof -i :"$RELAY_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
     echo "Relay 서버: 포트 $RELAY_PORT 이미 사용 중 — 스킵"
   else
     echo "Relay 서버 시작 중 (port $RELAY_PORT)..."
@@ -165,7 +165,7 @@ if [ -n "$RELAY_PORT" ]; then
     nohup $RELAY_PYTHON scripts/relay_server.py > /tmp/relay_server.log 2>&1 &
     RELAY_PID=$!
     sleep 2
-    if lsof -i :"$RELAY_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+    if command -v lsof &>/dev/null && lsof -i :"$RELAY_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
       echo "Relay 서버 시작 완료 (PID: $RELAY_PID, log: /tmp/relay_server.log)"
     else
       echo "경고: Relay 서버 시작 실패 — /tmp/relay_server.log 확인"

@@ -191,7 +191,9 @@ class LivenessChecker:
         self._ear_thresh     = c.get("blink_ear_thresh", 0.22)
         self._blink_frames   = c.get("blink_consec_frames", 2)
         self._yaw_thresh     = c.get("yaw_threshold", 0.15)
+        self._yaw_hold       = c.get("yaw_hold_frames", 2)
         self._nod_thresh     = c.get("nod_threshold", 0.08)
+        self._nod_hold       = c.get("nod_hold_frames", 2)
         self._mar_thresh     = c.get("mouth_mar_thresh", 0.45)
         self._mouth_frames   = c.get("mouth_consec_frames", 2)
 
@@ -309,6 +311,8 @@ class LivenessChecker:
         results   = self._face_mesh.process(frame_rgb)
 
         if not results.multi_face_landmarks:
+            # 얼굴 미검출 시 baseline 초기화 (재검출 시 새 기준점 사용)
+            self._reset_state()
             # v3.1: 얼굴 미검출 디버그 로그
             self._debug_counter += 1
             if self._debug_log and self._debug_counter % 5 == 0:
@@ -402,15 +406,35 @@ class LivenessChecker:
         first = self._meta.get("yaw_first", -1)
 
         if first == -1:   # 왼쪽 먼저
-            if delta < -self._yaw_thresh:
-                self._yaw_first_done = True
-            if self._yaw_first_done and delta > self._yaw_thresh:
-                self._yaw_second_done = True
+            if not self._yaw_first_done:
+                if delta < -self._yaw_thresh:
+                    self._yaw_first_counter += 1
+                    if self._yaw_first_counter >= self._yaw_hold:
+                        self._yaw_first_done = True
+                else:
+                    self._yaw_first_counter = 0
+            elif not self._yaw_second_done:
+                if delta > self._yaw_thresh:
+                    self._yaw_second_counter += 1
+                    if self._yaw_second_counter >= self._yaw_hold:
+                        self._yaw_second_done = True
+                else:
+                    self._yaw_second_counter = 0
         else:              # 오른쪽 먼저
-            if delta > self._yaw_thresh:
-                self._yaw_first_done = True
-            if self._yaw_first_done and delta < -self._yaw_thresh:
-                self._yaw_second_done = True
+            if not self._yaw_first_done:
+                if delta > self._yaw_thresh:
+                    self._yaw_first_counter += 1
+                    if self._yaw_first_counter >= self._yaw_hold:
+                        self._yaw_first_done = True
+                else:
+                    self._yaw_first_counter = 0
+            elif not self._yaw_second_done:
+                if delta < -self._yaw_thresh:
+                    self._yaw_second_counter += 1
+                    if self._yaw_second_counter >= self._yaw_hold:
+                        self._yaw_second_done = True
+                else:
+                    self._yaw_second_counter = 0
 
         return self._yaw_first_done and self._yaw_second_done
 
@@ -420,10 +444,22 @@ class LivenessChecker:
             self._nod_baseline = pitch
             return False
         delta = pitch - self._nod_baseline
-        if delta < -self._nod_thresh:
-            self._nod_up_done = True
-        if self._nod_up_done and delta > self._nod_thresh:
-            self._nod_down_done = True
+
+        if not self._nod_up_done:
+            if delta < -self._nod_thresh:
+                self._nod_up_counter += 1
+                if self._nod_up_counter >= self._nod_hold:
+                    self._nod_up_done = True
+            else:
+                self._nod_up_counter = 0
+        elif not self._nod_down_done:
+            if delta > self._nod_thresh:
+                self._nod_down_counter += 1
+                if self._nod_down_counter >= self._nod_hold:
+                    self._nod_down_done = True
+            else:
+                self._nod_down_counter = 0
+
         return self._nod_up_done and self._nod_down_done
 
     def _check_mouth(self, lm, w: int, h: int) -> bool:
@@ -441,14 +477,18 @@ class LivenessChecker:
     # 내부 상태 초기화
     # ──────────────────────────────────────────
     def _reset_state(self):
-        self._blink_counter   = 0
-        self._yaw_baseline    = None
-        self._yaw_first_done  = False
-        self._yaw_second_done = False
-        self._nod_baseline    = None
-        self._nod_up_done     = False
-        self._nod_down_done   = False
-        self._mouth_counter   = 0
+        self._blink_counter      = 0
+        self._yaw_baseline       = None
+        self._yaw_first_done     = False
+        self._yaw_second_done    = False
+        self._yaw_first_counter  = 0
+        self._yaw_second_counter = 0
+        self._nod_baseline       = None
+        self._nod_up_done        = False
+        self._nod_down_done      = False
+        self._nod_up_counter     = 0
+        self._nod_down_counter   = 0
+        self._mouth_counter      = 0
 
     # ──────────────────────────────────────────
     # 상태 조회

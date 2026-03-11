@@ -67,15 +67,15 @@ tts:
     lang: "en-us"
 
   elevenlabs:
-    api_key: ""
-    voice_id: ""
+    api_key: ""       # .env ELEVENLABS_API_KEY 로 주입 (settings.yaml에 평문 기재 금지)
+    voice_id: ""      # .env ELEVENLABS_VOICE_ID 로 주입
     model_id: "eleven_multilingual_v2"
 
 # ================================================================
 # STT 설정
 # ================================================================
 stt:
-  model_size: "small"
+  model_size: "base"
   language: "ko"
   device: "cpu"
   wake_word: "자비스야"

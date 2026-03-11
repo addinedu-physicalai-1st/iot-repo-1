@@ -16,6 +16,18 @@ if [ -f ".env" ]; then
     set -a; source .env; set +a
 fi
 
+# lsof 존재 확인
+if ! command -v lsof &>/dev/null; then
+    echo "경고: lsof 미설치 — pkill fallback 사용"
+    pkill -f "uvicorn server.main:app" 2>/dev/null && echo "  uvicorn 종료" || echo "  uvicorn — 실행 중이 아님"
+    pkill -f "relay_server.py" 2>/dev/null && echo "  Relay 종료" || echo "  Relay — 실행 중이 아님"
+    if command -v nginx &>/dev/null; then
+        nginx -s stop 2>/dev/null && echo "  nginx 종료" || echo "  nginx — 실행 중이 아님"
+    fi
+    echo "완료."
+    exit 0
+fi
+
 # 포트 종료 함수: SIGTERM → 대기 → SIGKILL → 포트 해제 확인
 kill_port() {
     local port=$1
@@ -59,5 +71,18 @@ kill_port 9000 "TCP 서버"
 
 RELAY_PORT="${RELAY_PORT:-8080}"
 kill_port "$RELAY_PORT" "Relay 서버"
+
+# 포트 기반으로 잡히지 않는 잔류 프로세스 정리 (STT/Whisper 스레드 등)
+ORPHAN_PIDS=$(pgrep -f "uvicorn server.main:app" 2>/dev/null || true)
+if [ -n "$ORPHAN_PIDS" ]; then
+    kill $ORPHAN_PIDS 2>/dev/null || true
+    sleep 1
+    # 여전히 남아있으면 강제 종료
+    ORPHAN_PIDS=$(pgrep -f "uvicorn server.main:app" 2>/dev/null || true)
+    if [ -n "$ORPHAN_PIDS" ]; then
+        kill -9 $ORPHAN_PIDS 2>/dev/null || true
+    fi
+    echo "  잔류 uvicorn 프로세스 정리 완료"
+fi
 
 echo "완료."

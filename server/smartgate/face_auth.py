@@ -28,7 +28,6 @@ InsightFace 특징:
         - 암호화 실패 시 평문 pkl fallback (서비스 중단 방지)
 """
 
-import pickle
 import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple
@@ -74,6 +73,9 @@ class FaceAuthenticator:
         min_face_size: int = 80,
         model_name: str = "buffalo_sc",
     ):
+        if not (0.0 <= tolerance <= 1.0):
+            raise ValueError(f"tolerance는 0.0~1.0 범위여야 합니다, 입력값: {tolerance}")
+
         self.face_db_dir   = Path(face_db_dir)
         self.known_dir     = self.face_db_dir / "known"
         self.cache_path    = self.face_db_dir / "encodings.pkl"   # 레거시
@@ -212,7 +214,7 @@ class FaceAuthenticator:
     def _save_cache(self):
         """
         HIGH-3: face_store.save_embeddings()로 암호화 저장.
-        실패 시 평문 pkl fallback (서비스 중단 방지).
+        face_store 없으면 저장 스킵 (pickle 사용 안 함).
         """
         payload = {"embeddings": self.known_embeddings, "names": self.known_names}
 
@@ -224,31 +226,24 @@ class FaceAuthenticator:
                     self.cache_path.unlink(missing_ok=True)
                     print("[FaceAuth] 레거시 encodings.pkl 삭제 완료")
                 return
-            print("[FaceAuth] ⚠️ 암호화 저장 실패 → 평문 pkl fallback")
-
-        # fallback: 평문 pkl (v1.0 동작 유지)
-        try:
-            with open(self.cache_path, "wb") as f:
-                pickle.dump(payload, f)
-            print(f"[FaceAuth] ⚠️ 평문 저장 (fallback): {self.cache_path}")
-        except Exception as e:
-            print(f"[FaceAuth] ❌ 캐시 저장 실패: {e}")
+            print("[FaceAuth] 캐시 저장 실패 (face_store 오류)")
+        else:
+            print("[FaceAuth] face_store 없음 — 캐시 저장 스킵 (매 시작 시 재임베딩)")
 
     def _load_cache(self, cache_file: Path):
         """
         캐시 파일 로드.
         .enc → face_store.load_embeddings()
-        .pkl → pickle.load() (레거시 fallback)
+        .pkl → 마이그레이션 필요 (직접 로드 안 함)
         """
         if cache_file.suffix == ".enc" and FACE_STORE_AVAILABLE:
             return face_store.load_embeddings(str(cache_file))
+        elif cache_file.suffix == ".pkl":
+            print("[FaceAuth] 레거시 pkl 캐시 감지 — 재임베딩으로 전환 (pickle 직접 로드 차단)")
+            return None
         else:
-            try:
-                with open(cache_file, "rb") as f:
-                    return pickle.load(f)
-            except Exception as e:
-                print(f"[FaceAuth] 평문 캐시 로드 실패: {e}")
-                return None
+            print(f"[FaceAuth] 알 수 없는 캐시 형식: {cache_file.suffix}")
+            return None
 
     def _parse_cache(self, cache) -> bool:
         """

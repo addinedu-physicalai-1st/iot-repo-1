@@ -66,7 +66,7 @@ PORCUPINE_FRAME_SIZE = 512    # 32ms @ 16kHz (고정값)
 VAD_ENERGY_THRESH  = 0.02
 VAD_MIN_SPEECH_MS  = 300
 VAD_MAX_SPEECH_SEC = 5    # v4.3: 10 → 5초 (강제 종료 대기 단축)
-VAD_SILENCE_SEC    = 0.8  # v4.3: 1.2 → 0.8초 (무음 종료 판정 단축)
+VAD_SILENCE_SEC    = 0.5  # v4.4: 0.8 → 0.5초 (응답 속도 개선)
 WAKE_LISTEN_SEC    = 8.0
 
 NOISE_PROFILE_SEC  = 0.5
