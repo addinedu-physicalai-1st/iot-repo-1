@@ -387,7 +387,7 @@ class CommandRouter:
             for room, pin in ROOM_SERVO_PIN.items():
                 if pin is None:
                     continue
-                target = DEVICE_HOME1 if room == "bedroom" else DEVICE_HOME2
+                target = DEVICE_HOME2
                 if not self._tcp.get_device(target):
                     target = DEVICE_HOME  # 하위 호환
                 payload = self._build_payload({"cmd": CMD_SERVO, "room": room, "angle": angle})
@@ -1144,10 +1144,8 @@ class CommandRouter:
         if cmd == CMD_LED:
             return DEVICE_HOME2
 
-        # 서보: 침실 커튼 → home1 / 차고·현관 → home2
+        # 서보: 모든 서보(침실/차고/현관) → home2
         if cmd == CMD_SERVO:
-            if room == "bedroom":
-                return DEVICE_HOME1
             return DEVICE_HOME2
 
         # 7세그 → home1 (욕실)

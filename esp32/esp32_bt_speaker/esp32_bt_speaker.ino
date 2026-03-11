@@ -7,7 +7,7 @@
  * 스피커:   PLEIGO BS15 (BT 5.3)
  *
  * 필요 라이브러리 (아두이노 IDE):
- *   - ESP32-A2DP (https://github.com/pschatzmann/ESP32-A2DP)
+ *   - ESP32-A2DP (https://github.com/pschatzmann/ESP32-A2DP)0
  *   - arduino-libhelix (https://github.com/pschatzmann/arduino-libhelix)
  *
  * 보드 설정 (아두이노 IDE):

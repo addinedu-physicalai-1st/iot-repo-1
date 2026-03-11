@@ -1,6 +1,12 @@
 """
 frame_analyzer.py — InsightFace 얼굴인식 + YOLOv8 객체 감지 통합 분석기
-v1.2 | Voice IoT Controller
+v1.3 | Voice IoT Controller
+
+v1.3 변경 (HIGH-3):
+  - ENCODINGS_CACHE: encodings.pkl → encodings.enc (Fernet 암호화)
+  - _load_face_db(): pickle.load → face_store.load_embeddings()
+  - _build_face_db(): pickle.dump → face_store.save_embeddings()
+  - rebuild_face_db(): enc + pkl 둘 다 삭제
 
 v1.2 변경:
   - bbox 표시 통합: InsightFace 얼굴 bbox 1개만 표시 (YOLO person bbox 제거)
@@ -29,11 +35,24 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# ── HIGH-3: face_store 임포트 ──────────────────────────────────
+try:
+    from server import face_store
+    FACE_STORE_AVAILABLE = True
+except ImportError:
+    try:
+        import face_store
+        FACE_STORE_AVAILABLE = True
+    except ImportError:
+        FACE_STORE_AVAILABLE = False
+        logger.warning("[FrameAnalyzer] face_store 모듈 없음 — 평문 pkl fallback 사용")
+
 # ──────────────────────────────────────────
 # 설정
 # ──────────────────────────────────────────
-FACE_DB_DIR        = Path("face_db/known")       # 등록 얼굴 이미지 폴더
-ENCODINGS_CACHE    = Path("face_db/encodings.pkl")  # 인코딩 캐시
+FACE_DB_DIR        = Path("face_db/known")          # 등록 얼굴 이미지 폴더
+ENCODINGS_CACHE    = Path("face_db/encodings.enc")  # HIGH-3: Fernet 암호화 캐시
+ENCODINGS_LEGACY   = Path("face_db/encodings.pkl")  # HIGH-3: 레거시 평문 (삭제 대상)
 FACE_THRESHOLD     = 0.45   # InsightFace cosine distance (낮을수록 엄격)
 YOLO_CONF          = 0.50   # YOLO 신뢰도 임계값
 YOLO_MODEL         = "yolov8n.pt"   # nano 모델 (경량, CPU 충분)
@@ -108,19 +127,37 @@ class FrameAnalyzer:
 
     # ── 얼굴 DB 관리 ─────────────────────────
     def _load_face_db(self):
-        """등록 얼굴 인코딩 로드 (캐시 우선, face_auth.py 포맷 호환)"""
+        """등록 얼굴 인코딩 로드 (암호화 캐시 우선, face_auth.py 포맷 호환)
+        HIGH-3: encodings.enc (Fernet) 우선, 없으면 encodings.pkl fallback
+        """
+        # enc 우선, 없으면 pkl fallback
+        cache_file = None
         if ENCODINGS_CACHE.exists():
+            cache_file = ENCODINGS_CACHE
+        elif ENCODINGS_LEGACY.exists():
+            cache_file = ENCODINGS_LEGACY
+            logger.warning("[FrameAnalyzer] 평문 pkl 캐시 감지 — face_auth 재시작 시 자동 마이그레이션됩니다")
+
+        if cache_file is not None:
             try:
-                with open(ENCODINGS_CACHE, "rb") as f:
-                    raw = pickle.load(f)
+                # HIGH-3: enc → face_store 복호화, pkl → pickle 직접 로드
+                if cache_file.suffix == ".enc" and FACE_STORE_AVAILABLE:
+                    raw = face_store.load_embeddings(str(cache_file))
+                else:
+                    with open(cache_file, "rb") as f:
+                        raw = pickle.load(f)
+
+                if raw is None:
+                    logger.warning("[FrameAnalyzer] 캐시 복호화 실패, 재생성")
+                    self._build_face_db()
+                    return
 
                 # ── 포맷 감지 & 변환 ──
-                # face_auth.py 포맷: {"embeddings": [...], "names": [...]}
+                # face_auth 포맷: {"embeddings": [...], "names": [...]}
                 # frame_analyzer 포맷: [{"name": str, "embedding": np.array}, ...]
                 if isinstance(raw, dict) and "embeddings" in raw:
                     embeddings = raw.get("embeddings", raw.get("encodings", []))
                     names = raw.get("names", [])
-                    # 사용자별 평균 임베딩으로 변환
                     user_embs: dict[str, list] = {}
                     for emb, name in zip(embeddings, names):
                         user_embs.setdefault(name, []).append(emb)
@@ -135,7 +172,6 @@ class FrameAnalyzer:
                         f"{unique} | 총 {len(embeddings)}장"
                     )
                 elif isinstance(raw, list):
-                    # 기존 frame_analyzer 포맷 그대로
                     self._known_db = raw
                     logger.info(f"[FrameAnalyzer] 얼굴 DB 캐시 로드: {len(self._known_db)}명")
                 else:
@@ -185,14 +221,22 @@ class FrameAnalyzer:
 
         self._known_db = db
         ENCODINGS_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        with open(ENCODINGS_CACHE, "wb") as f:
-            pickle.dump(db, f)
+
+        # HIGH-3: 암호화 저장 (face_store), 실패 시 평문 pkl fallback
+        if FACE_STORE_AVAILABLE:
+            face_store.save_embeddings(db, str(ENCODINGS_CACHE))
+        else:
+            with open(ENCODINGS_LEGACY, "wb") as f:
+                pickle.dump(db, f)
+            logger.warning("[FrameAnalyzer] ⚠️ 평문 pkl 저장 (face_store 없음)")
         logger.info(f"[FrameAnalyzer] 얼굴 DB 생성 완료: {len(db)}명")
 
     def rebuild_face_db(self):
-        """외부 호출용 — 새 얼굴 등록 후 DB 재빌드"""
-        if ENCODINGS_CACHE.exists():
-            ENCODINGS_CACHE.unlink()
+        """외부 호출용 — 새 얼굴 등록 후 DB 재빌드
+        HIGH-3: enc + pkl 둘 다 삭제 후 재빌드
+        """
+        ENCODINGS_CACHE.unlink(missing_ok=True)
+        ENCODINGS_LEGACY.unlink(missing_ok=True)
         self._build_face_db()
         logger.info("[FrameAnalyzer] 얼굴 DB 재빌드 완료")
 

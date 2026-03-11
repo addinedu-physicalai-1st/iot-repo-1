@@ -415,6 +415,38 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance
 @supports (height: 100dvh) {
   .tab-content { height: calc(100dvh - var(--header-h) - var(--voice-h) - var(--status-h)); }
 }
+
+/* ── SmartGate 얼굴 등록 모달 ── */
+.sg-register-modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; }
+.sg-register-modal.active { display:flex; }
+.sg-register-content { background:#1a1d23; border:1px solid #333; border-radius:12px;
+  width:380px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.5); }
+.sg-register-header { display:flex; justify-content:space-between; align-items:center;
+  padding:14px 18px; border-bottom:1px solid #333; font-size:0.95rem; font-weight:700; color:#e0e0e0; }
+.sg-register-close { background:none; border:none; color:#888; font-size:1.1rem; cursor:pointer; }
+.sg-register-close:hover { color:#e74c3c; }
+.sg-register-body { padding:16px 18px; }
+.sg-register-input-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.sg-register-input-row label { color:#aaa; font-size:0.82rem; white-space:nowrap; }
+.sg-register-input-row input { flex:1; padding:6px 10px; background:#12141a; border:1px solid #444;
+  border-radius:6px; color:#fff; font-size:0.85rem; outline:none; }
+.sg-register-input-row input:focus { border-color:#6c5ce7; }
+.sg-register-info { color:#aaa; font-size:0.8rem; margin-bottom:10px; min-height:20px; }
+.sg-register-info.ok { color:#00b894; }
+.sg-register-info.fail { color:#e74c3c; }
+.sg-register-count { color:#6c5ce7; font-size:0.82rem; margin-bottom:10px; }
+.sg-register-actions { display:flex; gap:8px; margin-bottom:14px; }
+.sg-btn-capture { flex:1; padding:8px; border:none; border-radius:6px;
+  background:#6c5ce7; color:#fff; font-size:0.85rem; cursor:pointer; }
+.sg-btn-capture:hover { background:#5a4bd1; }
+.sg-btn-reload { padding:8px 14px; border:1px solid #555; border-radius:6px;
+  background:transparent; color:#ccc; font-size:0.85rem; cursor:pointer; }
+.sg-btn-reload:hover { background:#2a2d33; }
+.sg-register-list { border-top:1px solid #333; padding-top:10px; }
+.sg-user-row { display:flex; justify-content:space-between; align-items:center; padding:6px 0; font-size:0.82rem; color:#ccc; }
+.sg-user-row .sg-user-del { background:none; border:none; color:#e74c3c; cursor:pointer; font-size:0.8rem; }
+.sg-user-row .sg-user-del:hover { text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -1043,10 +1075,10 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance
   document.getElementById('monitorSnapshotBtn').addEventListener('click', doSnapshot);
   document.getElementById('ccSnapshotBtn').addEventListener('click', doSnapshot);
 
-  document.getElementById('monitorAuthBtn').addEventListener('click', function(){ log('Auth: SmartGate 인증 (대시보드 참조)', 'info'); });
-  document.getElementById('monitorFaceBtn').addEventListener('click', function(){ log('Face: 얼굴 등록 (대시보드 참조)', 'info'); });
+  document.getElementById('monitorAuthBtn').addEventListener('click', function(){ log('Auth: SmartGate 인증', 'info'); });
+  document.getElementById('monitorFaceBtn').addEventListener('click', sgOpenRegisterModal);
   document.getElementById('ccAuthBtn').addEventListener('click', function(){ log('Auth: SmartGate 인증', 'info'); });
-  document.getElementById('ccFaceBtn').addEventListener('click', function(){ log('Face: 얼굴 등록', 'info'); });
+  document.getElementById('ccFaceBtn').addEventListener('click', sgOpenRegisterModal);
 
   // ════════════════════════════════════════════
   // BT 스피커 음악 제어
@@ -1451,7 +1483,116 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance
       connectWS();
     }, 50);
   }
+  // ── SmartGate 얼굴 등록 모달 ──
+  async function sgOpenRegisterModal() {
+    var m = document.getElementById('sgRegisterModal');
+    if (!m) return;
+    m.classList.add('active');
+    document.getElementById('sgRegName').value = '';
+    document.getElementById('sgRegInfo').textContent = '카메라를 바라보고 캡처 버튼을 누르세요.';
+    document.getElementById('sgRegInfo').className = 'sg-register-info';
+    document.getElementById('sgRegCount').textContent = '';
+    await sgLoadRegisteredFaces();
+  }
+  function sgCloseRegisterModal() {
+    var m = document.getElementById('sgRegisterModal');
+    if (m) m.classList.remove('active');
+  }
+  async function sgCaptureFace() {
+    var name = document.getElementById('sgRegName').value.trim();
+    var info = document.getElementById('sgRegInfo');
+    if (!name) { info.textContent='⚠️ 사용자 이름을 입력하세요'; info.className='sg-register-info fail'; return; }
+    info.textContent='📷 캡처 중...'; info.className='sg-register-info';
+    try {
+      var res = await fetch('/smartgate/register-face', {
+        method:'POST',
+        headers: Object.assign({}, getAuthHeaders(), {'Content-Type':'application/json'}),
+        body: JSON.stringify({name:name})
+      });
+      var data = await res.json();
+      if (data.status==='ok') {
+        info.textContent=data.msg; info.className='sg-register-info ok';
+        document.getElementById('sgRegCount').textContent='등록 이미지: '+data.count+'장';
+        log('📸 [SmartGate] 얼굴 등록: '+data.name+' ('+data.count+'장)','ok');
+        await sgLoadRegisteredFaces();
+      } else {
+        info.textContent='❌ '+(data.msg||'등록 실패'); info.className='sg-register-info fail';
+      }
+    } catch(e) {
+      info.textContent='❌ 서버 연결 실패'; info.className='sg-register-info fail';
+    }
+  }
+  async function sgReloadFaces() {
+    var info = document.getElementById('sgRegInfo');
+    info.textContent='🔄 재임베딩 중...'; info.className='sg-register-info';
+    try {
+      var res = await fetch('/smartgate/reload-faces',{method:'POST',headers:getAuthHeaders()});
+      var data = await res.json();
+      info.textContent='✅ '+(data.msg||'재임베딩 완료'); info.className='sg-register-info ok';
+      log('🔄 [SmartGate] 얼굴 DB 재임베딩 완료','ok');
+    } catch(e) {
+      info.textContent='❌ 재임베딩 실패'; info.className='sg-register-info fail';
+    }
+  }
+  async function sgLoadRegisteredFaces() {
+    var listDiv = document.getElementById('sgRegList');
+    if (!listDiv) return;
+    try {
+      var res = await fetch('/smartgate/registered-faces',{headers:getAuthHeaders()});
+      var data = await res.json();
+      if (!data.users||data.users.length===0) {
+        listDiv.innerHTML='<div style="color:#666;font-size:0.8rem;">등록된 사용자 없음</div>';
+        return;
+      }
+      listDiv.innerHTML = data.users.map(function(u){
+        return '<div class="sg-user-row"><span>👤 '+u.name+' ('+u.count+'장)</span>'+
+          '<button class="sg-user-del" onclick="sgDeleteFace(\''+u.name+'\')">삭제</button></div>';
+      }).join('');
+    } catch(e) {
+      listDiv.innerHTML='<div style="color:#e74c3c;font-size:0.8rem;">목록 로드 실패</div>';
+    }
+  }
+  async function sgDeleteFace(name) {
+    if (!confirm(name+' 사용자의 등록 얼굴을 모두 삭제하시겠습니까?')) return;
+    try {
+      var res = await fetch('/smartgate/registered-faces/'+encodeURIComponent(name),{method:'DELETE',headers:getAuthHeaders()});
+      var data = await res.json();
+      if (data.status==='ok') {
+        log('🗑️ [SmartGate] 얼굴 삭제: '+name,'info');
+        await sgLoadRegisteredFaces();
+      }
+    } catch(e) {}
+    await sgLoadRegisteredFaces();
+  }
+  window.sgOpenRegisterModal = sgOpenRegisterModal;
+  window.sgCloseRegisterModal = sgCloseRegisterModal;
+  window.sgCaptureFace = sgCaptureFace;
+  window.sgReloadFaces = sgReloadFaces;
+  window.sgDeleteFace = sgDeleteFace;
 })();
 </script>
+
+<!-- SmartGate 얼굴 등록 모달 -->
+<div class="sg-register-modal" id="sgRegisterModal">
+  <div class="sg-register-content">
+    <div class="sg-register-header">
+      <span>👤 SmartGate 얼굴 등록</span>
+      <button class="sg-register-close" onclick="sgCloseRegisterModal()">✕</button>
+    </div>
+    <div class="sg-register-body">
+      <div class="sg-register-input-row">
+        <label>사용자 이름</label>
+        <input type="text" id="sgRegName" placeholder="예: stephen" autocomplete="off">
+      </div>
+      <div class="sg-register-info" id="sgRegInfo">카메라를 바라보고 캡처 버튼을 누르세요.</div>
+      <div class="sg-register-count" id="sgRegCount"></div>
+      <div class="sg-register-actions">
+        <button class="sg-btn-capture" onclick="sgCaptureFace()">📸 캡처</button>
+        <button class="sg-btn-reload" onclick="sgReloadFaces()">🔄 재임베딩</button>
+      </div>
+      <div class="sg-register-list" id="sgRegList"></div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

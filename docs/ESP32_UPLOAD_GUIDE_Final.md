@@ -336,6 +336,19 @@ curl -X POST $SERVER/command \
 | 거실 카드 미표시 | DEVICE_ID 오타 | `"esp32_living"` 정확히 입력 확인 |
 | 음악 상태 서버 미반영 | ytPlayer WS 보고 미연결 | 브라우저 콘솔에서 WS 연결 상태 확인 |
 | 대시보드 OFFLINE | register 미수신 | 시리얼 로그 확인 후 재업로드 |
+| **Failed to communicate with the flash chip** | 업로드 속도/연결 불안정 | 아래 "플래시 업로드 실패" 참고 |
+
+### 플래시 업로드 실패 (Packet content transfer stopped / flash chip)
+
+칩은 인식되지만 플래시 쓰기가 실패할 때:
+
+1. **Upload Speed 115200** — `Tools` → `Upload Speed` → **115200** (921600은 CH340에서 불안정)
+2. **BOOT 버튼** — "Connecting...." 표시 시 **BOOT(0) 버튼** 길게 누른 채 기다리다가, "Writing at 0x..."로 넘어가면 손 뗌
+3. **Flash Mode** — `Tools` → `Flash Mode` → **DIO** 또는 **DOUT** (QIO에서 실패 시)
+4. **Flash Size** — `Tools` → `Flash Size` → **4MB (32Mb)** (WROVER 보드)
+5. **플래시 전체 삭제** — `Tools` → `Erase All Flash Before Sketch Upload` → `All Flash Contents` 실행 후, 다시 스케치 업로드
+6. **USB** — 데이터 케이블 사용, PC 본체 뒷면 USB에 직접 연결
+7. **GPIO 6~11** — 플래시 핀에 연결된 선이 있으면 모두 제거
 
 ---
 
