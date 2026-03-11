@@ -35,19 +35,25 @@
  #include <WiFi.h>
  #include <ArduinoJson.h>
  #include <ESP32Servo.h>
- 
- 
+ #include "config.h"          // WiFi/서버 민감정보 (config.h.example 참조)
+ #include "mbedtls/md.h"      // HMAC-SHA256 (ESP-IDF 내장, 설치 불필요)
+
+// ── HMAC 서명 검증 설정 ───────────────────────────────────────────
+// config.h 에 아래 줄 추가:
+//   #define ESP32_SECRET "서버 .env의 ESP32_SECRET 값과 동일하게"
+#ifndef ESP32_SECRET
+  #define ESP32_SECRET ""     // 빈 문자열 = HMAC 검증 비활성 (개발용)
+#endif
+#define HMAC_TIMESTAMP_TOLERANCE 30  // 허용 타임스탬프 오차 (초)
+
+
  // ================================================================
  // Config — 여기만 수정
  // ================================================================
- 
- 
- 
- #define WIFI_SSID      "addinedu_201class_2-2.4G"
- #define WIFI_PASSWORD  "201class2!"
- 
+
+
+ // WiFi/서버 설정은 config.h 에서 관리
  // ── TCP 서버 ──────────────────────────────────────────────────────
- #define SERVER_IP      "192.168.0.189"  // 서버 PC IP
  #define SERVER_PORT    9000
  
 // ── 디바이스 ID ───────────────────────────────────────────────────
@@ -126,6 +132,10 @@ const byte digitPatterns[10][7] = {
   {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH},  // 8
   {HIGH, HIGH, HIGH, HIGH, LOW,  HIGH, HIGH}   // 9
 };
+
+// 마이너스(-) 기호: 가운데 세그먼트(G)만 ON
+#define SEG7_IDX_MINUS  10
+const byte minusPattern[7] = {LOW, LOW, LOW, LOW, LOW, LOW, HIGH};
 
 // ── 7세그먼트 상태 변수 ───────────────────────────────────────────────
 int  seg7Digits[4]  = {0, 0, 0, 0};
@@ -317,30 +327,109 @@ volatile bool  g_dhtReady = false; // 새 값이 준비됐을 때 true
  // ================================================================
  // 명령 처리
  // ================================================================
- 
+ // HMAC-SHA256 검증 함수 (v3.2)
+ // ================================================================
+
+String computeHMAC(const char* secret, const String& ts, const String& payload) {
+  String msg = ts + "." + payload;
+  unsigned char result[32];
+  mbedtls_md_context_t ctx;
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  mbedtls_md_init(&ctx);
+  mbedtls_md_setup(&ctx, info, 1);
+  mbedtls_md_hmac_starts(&ctx, (const unsigned char*)secret, strlen(secret));
+  mbedtls_md_hmac_update(&ctx, (const unsigned char*)msg.c_str(), msg.length());
+  mbedtls_md_hmac_finish(&ctx, result);
+  mbedtls_md_free(&ctx);
+  String hex = "";
+  for (int i = 0; i < 32; i++) {
+    char buf[3];
+    sprintf(buf, "%02x", result[i]);
+    hex += buf;
+  }
+  return hex;
+}
+
+// 서명 패킷 검증 후 cmd 오브젝트 추출
+// 반환값: true=검증 통과, false=거부
+// outCmd: 검증된 cmd dict (통과 시에만 유효)
+bool verifyAndExtract(const String& raw, StaticJsonDocument<512>& outDoc) {
+  const char* secret = ESP32_SECRET;
+
+  // secret 없으면 HMAC 검증 스킵 (개발/하위호환 모드)
+  if (strlen(secret) == 0) {
+    DeserializationError err = deserializeJson(outDoc, raw);
+    return (err == DeserializationError::Ok);
+  }
+
+  // 서명 패킷 파싱: {"ts":..., "sig":..., "cmd":{...}}
+  StaticJsonDocument<512> wrapper;
+  DeserializationError err = deserializeJson(wrapper, raw);
+  if (err) {
+    Serial.println("[HMAC] 래퍼 JSON 파싱 실패");
+    return false;
+  }
+
+  const char* ts  = wrapper["ts"]  | "";
+  const char* sig = wrapper["sig"] | "";
+  if (strlen(ts) == 0 || strlen(sig) == 0) {
+    // 서명 없는 평문 패킷 → 하위 호환 허용
+    Serial.println("[HMAC] 서명 없음 — 평문 패킷으로 처리");
+    outDoc.set(wrapper);
+    return true;
+  }
+
+  // 타임스탬프 오차 검사 (재전송 공격 방지)
+  // NTP 미사용 시: millis()/1000 은 부팅 후 경과초라 절대시각 불일치
+  // → 운영 환경에서는 NTP 동기화 권장, 개발 중에는 tolerance를 크게 설정
+  // long serverTs = atol(ts);
+  // long now = (long)(millis() / 1000);
+  // if (abs(now - serverTs) > HMAC_TIMESTAMP_TOLERANCE) {
+  //   Serial.println("[HMAC] 타임스탬프 오차 초과");
+  //   return false;
+  // }
+
+  // cmd 재직렬화 후 HMAC 계산
+  String payloadStr;
+  serializeJson(wrapper["cmd"], payloadStr);
+  String expected = computeHMAC(secret, String(ts), payloadStr);
+
+  if (expected != String(sig)) {
+    Serial.printf("[HMAC] 서명 불일치 — 패킷 거부\n  expected: %s\n  received: %s\n",
+                  expected.c_str(), sig);
+    sendError("hmac_auth_failed");
+    return false;
+  }
+
+  Serial.println("[HMAC] 서명 검증 통과 ✓");
+  outDoc.set(wrapper["cmd"]);
+  return true;
+}
+
+ // ================================================================
+ // 명령 처리 (v3.2: HMAC 검증 추가)
+ // ================================================================
+
  void processCommand(String raw) {
    raw.trim();
    if (raw.length() == 0) return;
- 
+
    Serial.printf("[CMD] 수신: %s\n", raw.c_str());
- 
-   StaticJsonDocument<256> doc;
-   DeserializationError err = deserializeJson(doc, raw);
- 
-   if (err) {
-     Serial.printf("[CMD] JSON 파싱 오류: %s\n", err.c_str());
-     sendError("JSON parse error");
-     return;
+
+   // ── HMAC 검증 + cmd 추출 ──────────────────────────────────────
+   StaticJsonDocument<512> doc;
+   if (!verifyAndExtract(raw, doc)) {
+     return;  // 검증 실패 시 무시 (sendError는 verifyAndExtract 내부에서 처리)
    }
- 
+
    const char* cmd  = doc["cmd"];
-   const char* room = doc["room"] | "";   // 공간 구분자: living/bathroom/bedroom/garage/entrance
- 
+   const char* room = doc["room"] | "";
+
    if (!cmd) {
      sendError("missing cmd field");
      return;
    }
- 
+
   /* ── LED (비활성) ────────────────────────────────────────────────
    if (strcmp(cmd, "led") == 0) {
      int pin = resolveLedPin(room);
@@ -358,25 +447,26 @@ volatile bool  g_dhtReady = false; // 새 값이 준비됐을 때 true
      int angle = doc["angle"] | 0;
      angle = constrain(angle, 0, 180);
      cmdServo(sv, angle, room);
-     sendAck("servo", "ok");
- 
+     sendAckServo("ok", angle, resolveServoPin(room));
+
    // ── SEG7 ──────────────────────────────────────────────────────
    } else if (strcmp(cmd, "seg7") == 0) {
      const char* mode = doc["mode"]  | "num";
      float       val  = doc["value"] | 0.0f;
      cmdSeg7(mode, val);
      sendAck("seg7", "ok");
- 
+
    // ── PIR 모드 설정 ─────────────────────────────────────────────
    } else if (strcmp(cmd, "pir_mode") == 0) {
      const char* mode = doc["mode"] | "off";
      cmdPirMode(mode);
      sendAck("pir_mode", "ok");
- 
+
    } else {
      Serial.printf("[CMD] 알 수 없는 명령: %s\n", cmd);
      sendError("unknown cmd");
    }
+
  }
  
  
@@ -401,6 +491,11 @@ int resolveLedPin(const char* room) {
 Servo* resolveServo(const char* room) {
   if (strcmp(room, "bedroom") == 0) return &servoBedroom;
   return nullptr;  // garage, entrance 미사용
+}
+
+int resolveServoPin(const char* room) {
+  if (strcmp(room, "bedroom") == 0) return PIN_SERVO_BEDROOM;
+  return -1;
 }
  
  
@@ -608,6 +703,7 @@ void sendSensorData(float temp, const char* room) {
 // ================================================================
 
 /* ── cmdLed (비활성) ─────────────────────────────────────────────
+/* ── cmdLed (비활성) ─────────────────────────────────────────────
 void cmdLed(int pin, bool on, const char* room) {
   digitalWrite(pin, on ? HIGH : LOW);
   Serial.printf("[LED] %s GPIO%d → %s\n", room, pin, on ? "ON" : "OFF");
@@ -695,11 +791,15 @@ void clearSeg7() {
 }
  
 // ── 온도값 → seg7Digits 변환 ─────────────────────────────────────────
-// 표시 배치: [OFF][십의자리][일의자리+DP][소수점첫째]
+// 표시 배치: [-/OFF][십의자리][일의자리+DP][소수점첫째]
 // 예) 23.5°C → [OFF][2][3.][5]
+// 예) -5.3°C → [-  ][0][5.][3]  (첫째 자리에 '-' 표시)
 void setTempDisplay(float temp) {
-  int v = (int)(temp * 10.0f + 0.5f);  // 소수점 제거: 23.5 → 235
-  seg7Digits[0] = 0;           // 첫째 자리: 항상 OFF (표시 루프에서 건너뜀)
+  bool isNeg   = (temp < 0.0f);
+  float absTemp = isNeg ? -temp : temp;
+  int v = (int)(absTemp * 10.0f + 0.5f);  // 소수점 제거: 5.3 → 53
+
+  seg7Digits[0] = isNeg ? SEG7_IDX_MINUS : 0;  // 음수면 '-', 양수면 OFF
   seg7Digits[1] = (v / 100) % 10;  // 십의 자리
   seg7Digits[2] = (v / 10)  % 10;  // 일의 자리 (DP는 updateSeg7에서 처리)
   seg7Digits[3] =  v        % 10;  // 소수 첫째 자리
@@ -718,9 +818,11 @@ void displayDigit(int digit, int number, bool dp) {
   // 해당 디지트 선택 (LOW = 켜짐)
   digitalWrite(digitPins[digit], LOW);
 
-  // 숫자 패턴 출력
-  for (int i = 0; i < 7; i++) {
-    digitalWrite(segPins[i], digitPatterns[number][i]);
+  // 숫자 or 마이너스 패턴 출력
+  if (number == SEG7_IDX_MINUS) {
+    for (int i = 0; i < 7; i++) digitalWrite(segPins[i], minusPattern[i]);
+  } else {
+    for (int i = 0; i < 7; i++) digitalWrite(segPins[i], digitPatterns[number][i]);
   }
 
   // 소수점
@@ -745,13 +847,13 @@ void updateSeg7() {
   unsigned long now = millis();
   if (now - lastSeg7Update >= SEG7_REFRESH_INTERVAL) {
 
-    if (currentDigit == 0) {
-      // 첫째 자리는 항상 OFF: 이전(digit 3)만 끄고 아무것도 켜지 않음
+    if (currentDigit == 0 && seg7Digits[0] == 0) {
+      // 첫째 자리 OFF (양수 온도): 이전(digit 3)만 끄고 아무것도 켜지 않음
       digitalWrite(digitPins[3], HIGH);
       for (int i = 0; i < 7; i++) digitalWrite(segPins[i], LOW);
       digitalWrite(PIN_DP, LOW);
     } else {
-      // 세번째 자리(index 2)에는 소수점 ON
+      // 세번째 자리(index 2)에는 소수점 ON / 첫째 자리는 음수 '-' 표시
       bool dp = (currentDigit == 2);
       displayDigit(currentDigit, seg7Digits[currentDigit], dp);
     }
@@ -774,6 +876,18 @@ void updateSeg7() {
    tcpClient.print(msg);
    Serial.printf("[ACK] cmd=%s status=%s\n", cmd, status);
  }
+
+void sendAckServo(const char* status, int angle, int pin) {
+  String msg = "{\"type\":\"ack\",\"cmd\":\"servo\",\"status\":\"";
+  msg += status;
+  msg += "\",\"angle\":";
+  msg += angle;
+  msg += ",\"pin\":";
+  msg += pin;
+  msg += "}\n";
+  tcpClient.print(msg);
+  Serial.printf("[ACK] cmd=servo status=%s angle=%d pin=%d\n", status, angle, pin);
+}
  
  void sendError(const char* errMsg) {
    String msg = "{\"type\":\"error\",\"msg\":\"";

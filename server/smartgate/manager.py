@@ -19,6 +19,17 @@ v1.1 변경사항:
     · 제스처 인증, 2FA 성공, 게이트 오픈/닫힘
     · 잠금(lockout), PIR 환영 트리거
 
+v1.2 변경사항:
+  - 2FA 성공 후 gate_open 이벤트 브로드캐스트 추가
+    (auth_success와 gate_open 분리 → Command Log에 "게이트 열림" 표시 보장)
+  - 게이트 열림 시 서버 로그 추가
+
+v1.3 변경사항 (MEDIUM-6 보안 분리):
+  - _init_gesture_auth(): .env SMARTGATE_SEQUENCE 우선 적용
+    settings.yaml sequence: [] → .env에서 주입 (예: SMARTGATE_SEQUENCE=1,0,3)
+  - _print_init_banner(): 실제 적용된 시퀀스를 gesture_auth에서 직접 읽도록 수정
+  - status 프로퍼티: sequence를 gesture_auth.target_sequence 기준으로 반환
+
 인증 흐름:
   IDLE → (얼굴 인증) → LIVENESS → (챌린지 통과) → FACE_OK
        → (제스처 인증) → GESTURE_OK → (게이트 오픈) → IDLE
@@ -33,6 +44,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from collections import deque
 from enum import Enum, auto
@@ -159,13 +171,39 @@ class SmartGateManager:
         return LivenessChecker(_lc)
 
     def _init_gesture_auth(self):
-        """GestureAuthenticator 초기화"""
+        """GestureAuthenticator 초기화
+
+        우선순위:
+          1) .env SMARTGATE_SEQUENCE  (MEDIUM-6 보안 분리)
+          2) settings.yaml gesture_auth.sequence
+          3) 기본값 [1, 0, 3]
+        """
         from server.smartgate.gesture_auth import GestureAuthenticator
 
         _gc = self._cfg.get("gesture_auth", {})
+
+        # ── v1.3: .env SMARTGATE_SEQUENCE 우선 적용 ──────────────
+        seq_env = os.environ.get("SMARTGATE_SEQUENCE", "").strip()
+        if seq_env:
+            try:
+                # number 모드: "1,0,3" → [1, 0, 3]
+                sequence = [int(x.strip()) for x in seq_env.split(",")]
+            except ValueError:
+                # shape 모드: "circle,triangle" → ["circle", "triangle"]
+                sequence = [s.strip() for s in seq_env.split(",")]
+            logger.info(f"[SmartGate] SMARTGATE_SEQUENCE (.env) 적용: {sequence}")
+        else:
+            sequence = _gc.get("sequence", [1, 0, 3])
+            if not sequence:
+                logger.warning(
+                    "[SmartGate] ⚠️ SMARTGATE_SEQUENCE 미설정 — "
+                    "기본값 [1, 0, 3] 사용. .env에 SMARTGATE_SEQUENCE=1,0,3 추가 권장"
+                )
+                sequence = [1, 0, 3]
+
         return GestureAuthenticator(
             mode=_gc.get("mode", "number"),
-            sequence=_gc.get("sequence", [1, 0, 3]),
+            sequence=sequence,
             timeout_sec=_gc.get("timeout_sec", 7.0),
             hold_frames=_gc.get("hold_frames", 8),
             cooldown_sec=_gc.get("cooldown_sec", 1.5),
@@ -437,6 +475,10 @@ class SmartGateManager:
                 # 게이트 오픈
                 self.gate_ctrl.open_gate()
                 self._fail_count = 0
+                logger.info(
+                    f"[SmartGate] 🚪 게이트 열림 | "
+                    f"{self.gate_ctrl._open_duration}초 후 자동 닫힘"
+                )
 
                 self._db_log(
                     f"2FA 인증 성공: {self._authenticated_user}",
@@ -447,10 +489,16 @@ class SmartGateManager:
                     },
                 )
 
+                # v1.2: auth_success + gate_open 이벤트를 분리 브로드캐스트
                 await self._broadcast_event(
                     "auth_success",
                     user=self._authenticated_user,
                     sequence=list(self.gesture_auth.target_sequence),
+                )
+                await self._broadcast_event(
+                    "gate_open",
+                    user=self._authenticated_user,
+                    open_duration_sec=self.gate_ctrl._open_duration,
                 )
 
                 # ── PIR 환영 대기 모드 ──
@@ -603,10 +651,24 @@ class SmartGateManager:
             logger.info("[SmartGate] 🔧 시뮬레이션 모드 | 현관 조명 ON (skip)")
             return
         try:
-            from protocol.schema import cmd_light
+            import json as _j
+            from server.esp32_secure import build_signed_packet as _build_signed_packet
+            from protocol.schema import cmd_led, ROOM_LED_PIN
+
             device_id = self._cfg.get("gate_device_id", "esp32_entrance")
-            command = cmd_light(pin=0, state=True, room="entrance")
-            result = await self._tcp_server.send_command(device_id, command)
+            pin = ROOM_LED_PIN.get("entrance", 0)
+            payload = cmd_led(pin, "on", "entrance")
+
+            # HMAC 서명 적용 (esp32_secure 없으면 평문 전송)
+            try:
+                cmd_str = payload.decode().strip()
+                cmd_dict = _j.loads(cmd_str)
+                signed = _build_signed_packet(cmd_dict)
+                payload = (signed + "\n").encode()
+            except Exception:
+                pass  # 서명 실패 시 평문 그대로
+
+            result = await self._tcp_server.send_command(device_id, payload)
             if result:
                 logger.info("[SmartGate] 💡 현관 조명 ON")
             else:
@@ -648,7 +710,8 @@ class SmartGateManager:
             "fail_count": self._fail_count,
             "max_failures": self._max_failures,
             "mode": _gc.get("mode", "number"),
-            "sequence": _gc.get("sequence", []),
+            # v1.3: settings.yaml sequence 대신 실제 적용된 시퀀스 반환
+            "sequence": list(self.gesture_auth.target_sequence),
             "liveness_profile": _lv.get("active_profile", "laptop"),
             "liveness_enabled": self.liveness.enabled,
             "face_db_ready": self.face_auth.is_ready,
@@ -672,13 +735,14 @@ class SmartGateManager:
         _gc = self._cfg.get("gesture_auth", {})
         _lv = self._cfg.get("liveness", {})
         _mode = _gc.get("mode", "number")
-        _seq = _gc.get("sequence", [])
         _profile = _lv.get("active_profile", "laptop")
         _pool = _lv.get("profiles", {}).get(_profile, {}).get(
             "challenges_pool", []
         )
 
         _users = list(dict.fromkeys(self.face_auth.known_names))
+        # v1.3: 실제 적용된 시퀀스를 gesture_auth에서 직접 읽음
+        _seq = list(self.gesture_auth.target_sequence)
 
         logger.info(
             f"[SmartGate] 초기화 완료 | "

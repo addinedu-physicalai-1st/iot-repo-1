@@ -34,6 +34,7 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
+#include "config.h"          // WiFi/서버 민감정보 (config.h.example 참조)
 // #include <TM1637Display.h>  // 미사용
 
 
@@ -43,11 +44,8 @@
 
 
 
-#define WIFI_SSID      "addinedu_201class_2-2.4G"
-#define WIFI_PASSWORD  "201class2!"
-
+// WiFi/서버 설정은 config.h 에서 관리
 // ── TCP 서버 ──────────────────────────────────────────────────────
-#define SERVER_IP      "192.168.0.189"  // 서버 PC IP
 #define SERVER_PORT    9000
 
 // ── 디바이스 ID ───────────────────────────────────────────────────
@@ -337,9 +335,13 @@ void handlePir() {
   bool motionDetected = (digitalRead(PIN_PIR) == HIGH);
   unsigned long now   = millis();
 
-  // LOW → HIGH 상승 엣지: 모드 무관하게 한 번만 출력
+  // LOW → HIGH 상승 엣지: 모드에 관계없이 서버에 기본 motion_detected 이벤트 전송
   if (motionDetected && !prevMotion) {
     Serial.println("[PIR] 감지가 되었다");
+    if (now - lastAlertTime > PIR_ALERT_COOLDOWN_MS) {
+      sendPirEvent("motion_detected", "rising_edge");
+      lastAlertTime = now;
+    }
   }
   prevMotion = motionDetected;
 

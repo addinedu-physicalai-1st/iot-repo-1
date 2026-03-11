@@ -19,7 +19,8 @@ v0.8 변경사항:
   - frame_analyzer.py : InsightFace 얼굴인식 + YOLOv8 객체감지
   - face_db.py        : 등록 얼굴 DB REST API 라우터
   - 신규 엔드포인트:
-      GET  /camera/entrance/stream    MJPEG HTTP 스트림
+      GET  /camera/entrance/stream    MJPEG HTTP 스트림 (오버레이 포함)
+      GET  /camera/entrance/raw       MJPEG Raw (지연 최소, 재인코딩 없음)
       GET  /camera/entrance/snapshot  스냅샷 JPEG 1장
       GET  /face-db/list              등록 인물 목록
       POST /face-db/register          얼굴 등록 (multipart)
@@ -98,6 +99,7 @@ from pathlib import Path
 
 import yaml
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -122,20 +124,58 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── [DEBUG] command_router 진단용 DEBUG 레벨 활성화 ──────────────────
+# dnd_mode TTS 미억제 이슈(ISSUE_dnd모드_TTS알람미억제_20260307) 추적용
+# 원인 확인 후 아래 두 줄 제거
+logging.getLogger("server.command_router").setLevel(logging.DEBUG)
+logging.getLogger("server.camera_stream").setLevel(logging.DEBUG)
+
 
 # ─────────────────────────────────────────────
 # 설정 로드
 # ─────────────────────────────────────────────
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.yaml"
+ENV_PATH    = Path(__file__).parent.parent / ".env"
 
 def load_settings() -> dict:
+    # .env 파일 로드 (없으면 무시)
+    load_dotenv(ENV_PATH)
+
     if not CONFIG_PATH.exists():
         logger.error(f"설정 파일 없음: {CONFIG_PATH}")
         sys.exit(1)
     with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     logger.info(f"설정 로드 완료: {CONFIG_PATH}")
+
+    # ── .env 환경변수로 민감정보 오버라이드 ──────────────────
+    if os.getenv("MIC_DEVICE"):
+        cfg.setdefault("stt", {})["mic_device"] = int(os.environ["MIC_DEVICE"])
+
+    if os.getenv("PORCUPINE_ACCESS_KEY"):
+        cfg.setdefault("stt", {})["porcupine_access_key"] = os.environ["PORCUPINE_ACCESS_KEY"]
+
+    if os.getenv("DB_HOST"):
+        cfg.setdefault("database", {})["host"] = os.environ["DB_HOST"]
+    if os.getenv("DB_USER"):
+        cfg.setdefault("database", {})["user"] = os.environ["DB_USER"]
+    if os.getenv("DB_PASSWORD"):
+        cfg.setdefault("database", {})["password"] = os.environ["DB_PASSWORD"]
+
+    if os.getenv("OLLAMA_HOST"):
+        cfg.setdefault("ollama", {})["host"] = os.environ["OLLAMA_HOST"]
+    if os.getenv("LLM_MODEL"):
+        cfg.setdefault("ollama", {})["model"] = os.environ["LLM_MODEL"]
+
+    # ── SmartGate 제스처 시퀀스 (.env SMARTGATE_SEQUENCE="1,0,3") ──
+    if os.getenv("SMARTGATE_SEQUENCE"):
+        try:
+            seq = [int(x.strip()) for x in os.environ["SMARTGATE_SEQUENCE"].split(",")]
+            cfg.setdefault("smartgate", {}).setdefault("gesture_auth", {})["sequence"] = seq
+        except ValueError:
+            logger.warning("[Config] SMARTGATE_SEQUENCE 파싱 실패 — settings.yaml 값 사용")
+
     return cfg
 
 
@@ -166,13 +206,17 @@ def create_app() -> FastAPI:
 
     # ── 브라우저 접속 시 현재 상태 즉시 전송 ────────────────────────
     async def _on_ws_connect(client_id: str, send_fn):
-        """새 브라우저 접속 → device_list + 각 device_update 즉시 전송"""
+        """새 브라우저 접속 → device_list + 각 device_update + stt config 전송"""
+        import json as _json
         from protocol.schema import ws_device_list, ws_device_update
         devices = tcp_server.get_device_list()
         await send_fn(ws_device_list(devices))
         for d in devices:
             await send_fn(ws_device_update(d["device_id"], d["state"]))
-        logger.info(f"[WS] 접속 {client_id} → device_list {len(devices)}개 + state 전송")
+        # 웨이크워드 소스: browser=브라우저 마이크만 | server=서버 마이크
+        wake_src = cfg.get("stt", {}).get("wake_source", "server")
+        await send_fn(_json.dumps({"type": "config", "stt_wake_source": wake_src}, ensure_ascii=False))
+        logger.info(f"[WS] 접속 {client_id} → device_list {len(devices)}개 + state + stt_wake_source={wake_src}")
 
     ws_hub._on_connect = _on_ws_connect
 
@@ -239,12 +283,13 @@ def create_app() -> FastAPI:
         _stt = cfg.get("stt", {})
         stt_engine = STTEngine(
             on_result              = _make_stt_callback(command_router, ws_hub, tts_engine, db_logger),
-            on_wake                = _make_wake_callback(ws_hub),
+            on_wake                = _make_wake_callback(ws_hub, tts_engine),
             on_timeout             = _make_timeout_callback(ws_hub),
             model_size             = _stt.get("model_size", "base"),
             language               = _stt.get("language", "ko"),
             device                 = _stt.get("device", "cpu"),
             wake_word              = _stt.get("wake_word", "자비스야"),
+            wake_source            = _stt.get("wake_source", "server"),
             porcupine_access_key   = _stt.get("porcupine_access_key", ""),
             porcupine_model_path   = _stt.get("porcupine_model_path", ""),
             porcupine_params_path  = _stt.get("porcupine_params_path", ""),
@@ -372,11 +417,16 @@ def create_app() -> FastAPI:
             # ESP-CAM 설정 (settings.yaml camera 블록 있으면 사용)
             _cam_cfg    = cfg.get("camera", {})
             _udp_port   = _cam_cfg.get("udp_port",   5005)
-            _multipart  = _cam_cfg.get("multipart",  False)
+            # 항상 멀티파트 모드 사용 (헤더+조각 조립)
+            _multipart  = _cam_cfg.get("multipart",  True)
             _analyze_n  = _cam_cfg.get("analyze_every", 10)
 
             cam_mod.UDP_PORT       = _udp_port
             cam_mod.ANALYZE_EVERY  = _analyze_n
+
+            # ── v1.0: UDP IP 화이트리스트 주입 (MEDIUM-5) ──────────────
+            _allowed_ips = cam_mod.load_allowed_cam_ips(_cam_cfg)
+            cam_mod.set_allowed_cam_ips(_allowed_ips)
 
             # UDP 수신 스레드 시작
             cam_mod.start(multipart=_multipart)
@@ -402,6 +452,22 @@ def create_app() -> FastAPI:
                 if tts_engine:
                     await tts_engine.speak(text)
 
+            # ── v1.0: 보안모드 콜백을 analysis_loop 시작 전에 등록 ──────
+            # 수정 이유: 기존 코드는 SmartGate 이후에 콜백 등록 → analysis_loop가
+            # 콜백 없이 먼저 시작되는 순서 버그. analysis_loop 직전으로 이동.
+            def _get_security_mode() -> str:
+                """현재 PIR 보안모드 반환 (camera_stream 콜백용)"""
+                pir = command_router._current_pir_mode
+                # "dnd_mode" → "dnd", "away_mode" → "away", None → "off"
+                if pir is None:
+                    return "off"
+                mode = pir.replace("_mode", "")
+                logger.debug(f"[SecurityMode] _get_security_mode() → {mode} (raw={pir})")
+                return mode
+
+            cam_mod.set_security_mode_fn(_get_security_mode)
+            logger.info("[CAM] 보안모드 콜백 연동 완료 (command_router → camera_stream)")
+
             # 분석 루프 asyncio task
             analysis_task = asyncio.create_task(
                 cam_mod.analysis_loop(
@@ -423,23 +489,6 @@ def create_app() -> FastAPI:
             if frame_analyzer is not None:
                 frame_analyzer.set_face_auth(smartgate_manager.face_auth)
                 logger.info("[CAM] frame_analyzer ← SmartGate face_auth 연동 완료")
-
-        # ── v1.0: 보안모드 → camera_stream 연동 ──────────────────────
-        # command_router._current_pir_mode ("dnd_mode" 등)를 camera_stream에 전달
-        # → 방해 금지 모드 시 intruder 알람 억제
-        if not disable_cam:
-            import server.camera_stream as _cam_ref2
-
-            def _get_security_mode() -> str:
-                """현재 PIR 보안모드 반환 (camera_stream 콜백용)"""
-                pir = command_router._current_pir_mode
-                # "dnd_mode" → "dnd", "away_mode" → "away", None → "off"
-                if pir is None:
-                    return "off"
-                return pir.replace("_mode", "")
-
-            _cam_ref2.set_security_mode_fn(_get_security_mode)
-            logger.info("[CAM] 보안모드 콜백 연동 완료 (command_router → camera_stream)")
 
         logger.info("=" * 50)
         logger.info("서버 준비 완료 - 요청 대기 중")
@@ -560,7 +609,7 @@ def create_app() -> FastAPI:
     @app.get("/camera/entrance/stream")
     async def camera_entrance_stream():
         """
-        현관 ESP32-CAM MJPEG HTTP 스트림
+        현관 ESP32-CAM MJPEG HTTP 스트림 (오버레이 포함, 분석용)
         웹앱: <img src="/camera/entrance/stream">
         """
         if disable_cam:
@@ -582,6 +631,34 @@ def create_app() -> FastAPI:
                 "Cache-Control":    "no-cache, no-store, must-revalidate",
                 "Pragma":           "no-cache",
                 "X-Accel-Buffering":"no",   # nginx reverse proxy 버퍼링 비활성화
+            },
+        )
+
+    @app.get("/camera/entrance/raw")
+    async def camera_entrance_raw():
+        """
+        현관 ESP32-CAM Raw MJPEG 스트림 (지연 최소)
+        디코드/오버레이/재인코딩 없이 원본 JPEG 전송
+        """
+        if disable_cam:
+            return JSONResponse(
+                {"status": "error", "msg": "카메라 비활성화 (DISABLE_CAM=1)"},
+                status_code=503,
+            )
+        try:
+            from server.camera_stream import mjpeg_raw_generator
+        except ImportError:
+            return JSONResponse(
+                {"status": "error", "msg": "camera_stream 모듈 없음"},
+                status_code=503,
+            )
+        return StreamingResponse(
+            mjpeg_raw_generator(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control":    "no-cache, no-store, must-revalidate",
+                "Pragma":           "no-cache",
+                "X-Accel-Buffering":"no",
             },
         )
 
@@ -725,9 +802,12 @@ def _extract_tts_response(result) -> str | None:
         return None
 
 
-def _make_wake_callback(ws_hub: WebSocketHub):
-    """웨이크 워드 감지 콜백"""
+def _make_wake_callback(ws_hub: WebSocketHub, tts_engine: TTSEngine | None = None):
+    """웨이크 워드 감지 콜백 — TTS 재생 중이면 즉시 중지"""
     async def on_wake():
+        if tts_engine and tts_engine.is_speaking:
+            tts_engine.stop()
+            logger.info("[Pipeline] 웨이크 워드 감지 → TTS 재생 중지")
         logger.info("[Pipeline] 웨이크 워드 감지 → UI 알림")
         await ws_hub.broadcast(
             '{"type":"wake_detected","msg":"자비스야 감지됨 - 명령을 말씀하세요"}'

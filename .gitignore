@@ -202,6 +202,15 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# ESP32 민감정보 (WiFi/서버 IP)
+esp32/config.h
+esp32/*/config.h
+
+# nginx SSL 인증서 및 로그
+nginx/ssl/*.pem
+nginx/ssl/openssl.cnf
+nginx/logs/
+
 # Large model files
 models/kokoro-v0_19.onnx
 

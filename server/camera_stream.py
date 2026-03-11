@@ -1,6 +1,6 @@
 """
 camera_stream.py — ESP-CAM UDP 수신 + MJPEG WebSocket 스트리밍
-v2.0 | Voice IoT Controller
+v2.2 | Voice IoT Controller
 - v1.1: SOI/EOI 자동 조립, FPS/품질 최적화
 - v1.2: 디버그 로그 강화 (패킷 수신 확인용)
 - v1.3: cam_verdict WS 브로드캐스트 (매 분석마다 Command Log 기록)
@@ -15,7 +15,11 @@ v2.0 | Voice IoT Controller
          verdict 캐시·cam_verdict·cam_alert·TTS·서버 로그 모두 억제
          MJPEG 오버레이도 쿨다운 중 CLEAR 유지
 - v1.9: 보안모드(dnd) 알람 억제, SmartGate 활성 시 frame_analyzer 분석 skip
+- v2.1: dnd 모드 시 unknown 로그 + intruder 알람/TTS 완전 억제
 - v2.0: known 알림 "귀가"→"인식" 변경, known 쿨다운 10초→60초
+- v2.2: UDP IP 화이트리스트 (MEDIUM-5) — 비인가 IP 패킷 차단
+         simple/multipart 수신 모두 적용, .env CAM_ALLOWED_IPS 또는
+         settings.yaml camera.allowed_ips 로 관리
 
 ESP-CAM → UDP (JPEG 프레임) → Python 수신
     → frame_analyzer 분석 (매 ANALYZE_EVERY 프레임)
@@ -26,17 +30,81 @@ ESP-CAM → UDP (JPEG 프레임) → Python 수신
 
 import asyncio
 import logging
+import os
 import socket
 import struct
 import threading
 import time
 from collections import deque
-from typing import Optional
+from typing import Optional, Set
 
 import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────
+# v2.2: UDP IP 화이트리스트
+# ──────────────────────────────────────────
+# 허용 IP 집합 (main.py startup에서 set_allowed_cam_ips()로 주입)
+# 빈 집합이면 필터링 비활성화 (경고 로그 출력)
+_allowed_cam_ips: Set[str] = set()
+# 비인가 IP별 차단 횟수 (로그 폭발 방지용)
+_blocked_ip_counter: dict = {}
+
+
+def set_allowed_cam_ips(ips: Set[str]) -> None:
+    """허용 IP 집합 주입 (main.py startup에서 호출)"""
+    global _allowed_cam_ips
+    _allowed_cam_ips = set(ips)
+    if _allowed_cam_ips:
+        logger.info("[CameraStream] UDP IP 화이트리스트 설정: %s", _allowed_cam_ips)
+    else:
+        logger.warning("[CameraStream] UDP IP 화이트리스트 미설정 — IP 필터링 비활성화 (보안 위험)")
+
+
+def load_allowed_cam_ips(settings: dict) -> Set[str]:
+    """
+    허용 IP 목록 로드.
+    우선순위: 환경변수 CAM_ALLOWED_IPS > settings.yaml camera.allowed_ips
+    main.py startup에서 호출 후 set_allowed_cam_ips()로 주입.
+
+    예)
+        .env:           CAM_ALLOWED_IPS=192.168.0.50,192.168.0.51
+        settings.yaml:  camera.allowed_ips: ["192.168.0.50", "192.168.0.51"]
+    """
+    env_val = os.getenv("CAM_ALLOWED_IPS", "").strip()
+    if env_val:
+        ips = {ip.strip() for ip in env_val.split(",") if ip.strip()}
+        logger.info("[CameraStream] IP 화이트리스트 로드 (env): %s", ips)
+        return ips
+
+    yaml_ips = settings.get("camera", {}).get("allowed_ips", [])
+    if yaml_ips:
+        ips = set(yaml_ips)
+        logger.info("[CameraStream] IP 화이트리스트 로드 (yaml): %s", ips)
+        return ips
+
+    logger.warning("[CameraStream] CAM_ALLOWED_IPS 미설정 — UDP IP 필터링 비활성화")
+    return set()
+
+
+def _check_allowed_ip(src_ip: str) -> bool:
+    """
+    IP 화이트리스트 검사.
+    허용 목록이 비어 있으면 항상 True (필터링 비활성).
+    비인가 IP는 100회마다 1회 WARNING 로그.
+    """
+    if not _allowed_cam_ips:
+        return True
+    if src_ip in _allowed_cam_ips:
+        return True
+    cnt = _blocked_ip_counter.get(src_ip, 0) + 1
+    _blocked_ip_counter[src_ip] = cnt
+    if cnt % 100 == 1:
+        logger.warning("[CameraStream] 비인가 IP 차단: %s (누적 %d회)", src_ip, cnt)
+    return False
 
 # ──────────────────────────────────────────
 # 설정
@@ -44,10 +112,11 @@ logger = logging.getLogger(__name__)
 UDP_IP            = "0.0.0.0"
 UDP_PORT          = 5005          # ESP-CAM UDP 송신 포트
 UDP_BUFFER_SIZE   = 65535         # UDP 최대 수신 버퍼
-FRAME_QUEUE_SIZE  = 10            # 최신 프레임 큐 (5→10, 버퍼 여유)
-ANALYZE_EVERY     = 20            # 매 N 프레임마다 분석 (CPU 절약)
+UDP_RCVBUF_BYTES  = 1024 * 1024   # SO_RCVBUF 1MB (네트워크 스택 버퍼링 최소화)
+FRAME_QUEUE_SIZE  = 10            # 최신 프레임 큐 (분석용, 지연 민감 시 ANALYZE_EVERY↑)
+ANALYZE_EVERY     = 20            # 매 N 프레임마다 분석 (CPU 절약, 키우면 지연 영향↓)
 STREAM_FPS_LIMIT  = 10            # MJPEG HTTP 스트림 FPS (15→10, 끊김 방지)
-JPEG_QUALITY      = 70            # 재압축 JPEG 품질 (80→70, 전송량 감소)
+JPEG_QUALITY      = 70            # 재압축 JPEG 품질 (오버레이 스트림용)
 SMARTGATE_EVERY   = 1             # v1.6: 매 N 프레임마다 SmartGate에 공급
 
 # ESP-CAM 패킷 헤더 구조 (Arduino 펌웨어와 일치해야 함)
@@ -55,6 +124,12 @@ SMARTGATE_EVERY   = 1             # v1.6: 매 N 프레임마다 SmartGate에 공
 MAGIC             = b'\xAB\xCD\xEF\x01'
 HEADER_FMT        = ">4sIIHH"
 HEADER_SIZE       = struct.calcsize(HEADER_FMT)  # 16 bytes
+
+# 하이브리드 재전송: frame_id 기준 손실률 → ESP32에 quality_down/up UDP 명령
+ESP32_UDP_CMD_PORT = 5006         # esp32_cam.ino LOCAL_PORT (명령 수신 포트)
+LOSS_RATE_THRESHOLD = 0.15        # 15% 이상 손실 시 quality_down
+LOSS_RATE_RECOVERY  = 0.05       # 5% 이하로 유지 시 quality_up
+LOSS_WINDOW_SIZE    = 50         # 손실률 계산 윈도우 (프레임 수)
 
 # ──────────────────────────────────────────
 # 전역 상태
@@ -217,6 +292,10 @@ def _udp_simple_receiver():
         pkt_count += 1
         now = time.time()
 
+        # ── v2.2: IP 화이트리스트 검사 ──
+        if not _check_allowed_ip(addr[0]):
+            continue
+
         # ── 단일 완전 JPEG (SOI + EOI 모두 포함) ──
         if data[:2] == b'\xff\xd8' and data[-2:] == b'\xff\xd9':
             frame_buf = b""
@@ -269,18 +348,33 @@ def _udp_multipart_receiver():
     """
     멀티파트 모드: MAGIC + 헤더로 프레임 조립
     [magic 4B][frame_id 4B][total_len 4B][part_idx 2B][total_parts 2B][JPEG chunk...]
+    frame_id 기준 손실률 계산 → 일정 이상 시 ESP32에 quality_down/up UDP 명령 전송
     """
     global _latest_frame
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, UDP_RCVBUF_BYTES)
     sock.settimeout(1.0)
     sock.bind((UDP_IP, UDP_PORT))
     logger.info(f"[CameraStream] UDP 멀티파트 수신 시작 — {UDP_IP}:{UDP_PORT}")
 
+    # ESP32 명령 전송용 소켓 (별도, bind 불필요)
+    try:
+        send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        send_sock = None
+
     frame_count = 0
     frame_parts = {}         # {frame_id: {part_idx: data, ...}}
     frame_meta  = {}         # {frame_id: (total_len, total_parts)}
+
+    # 하이브리드 재전송: 손실률 추적
+    last_seen_frame_id = None
+    total_lost = 0
+    total_received = 0
+    last_quality_cmd = ""    # "down" | "up" | ""
+    frames_since_cmd = 0
 
     while _running:
         try:
@@ -293,12 +387,17 @@ def _udp_multipart_receiver():
         if len(data) < HEADER_SIZE:
             continue
 
+        # ── v2.2: IP 화이트리스트 검사 ──
+        if not _check_allowed_ip(addr[0]):
+            continue
+
         magic, frame_id, total_len, part_idx, total_parts = \
             struct.unpack(HEADER_FMT, data[:HEADER_SIZE])
 
         if magic != MAGIC:
             continue
 
+        esp32_addr = (addr[0], ESP32_UDP_CMD_PORT)  # ESP32 수신 포트로 명령 전송
         payload = data[HEADER_SIZE:]
 
         if frame_id not in frame_parts:
@@ -319,6 +418,37 @@ def _udp_multipart_receiver():
                 _frame_queue.append((frame_count, jpeg_bytes))
                 frame_count += 1
 
+                # 손실률 계산 (frame_id 갭 기반)
+                if last_seen_frame_id is not None and frame_id > last_seen_frame_id + 1:
+                    lost = frame_id - last_seen_frame_id - 1
+                    total_lost += lost
+                total_received += 1
+                last_seen_frame_id = frame_id
+                frames_since_cmd += 1
+
+                # 윈도우마다 손실률 체크 → quality_down/up 전송
+                n = total_received + total_lost
+                if n >= LOSS_WINDOW_SIZE and frames_since_cmd >= 20 and send_sock:
+                    loss_rate = total_lost / max(1, n)
+                    if loss_rate >= LOSS_RATE_THRESHOLD and last_quality_cmd != "down":
+                        try:
+                            send_sock.sendto(b"quality_down", esp32_addr)
+                            last_quality_cmd = "down"
+                            frames_since_cmd = 0
+                            logger.info(f"[CameraStream] 손실률 {loss_rate:.0%} → quality_down 전송")
+                        except OSError:
+                            pass
+                    elif loss_rate <= LOSS_RATE_RECOVERY and last_quality_cmd == "down":
+                        try:
+                            send_sock.sendto(b"quality_up", esp32_addr)
+                            last_quality_cmd = ""
+                            frames_since_cmd = 0
+                            logger.info(f"[CameraStream] 손실률 {loss_rate:.0%} → quality_up 전송")
+                        except OSError:
+                            pass
+                    total_lost = 0
+                    total_received = 0
+
             del frame_parts[frame_id]
             del frame_meta[frame_id]
 
@@ -329,6 +459,11 @@ def _udp_multipart_receiver():
             if fid in frame_meta:
                 del frame_meta[fid]
 
+    if send_sock:
+        try:
+            send_sock.close()
+        except OSError:
+            pass
     sock.close()
     logger.info("[CameraStream] UDP 멀티파트 수신 스레드 종료")
 
@@ -475,6 +610,7 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
         # 인증 성공 후 120초 동안은 intruder → clear 강제 변환
         # (인증된 사용자가 현관에 머무를 때 미등록 오탐 방지)
         _suppress_intruder = False
+        _suppress_reason   = ""
 
         if label == "intruder":
             # 1) 보안모드가 방해 금지(dnd)이면 억제
@@ -483,6 +619,7 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
                     _sec_mode = _get_security_mode()
                     if _sec_mode == "dnd":
                         _suppress_intruder = True
+                        _suppress_reason   = "dnd"
                         logger.debug(
                             f"[CameraStream] 보안모드 '{_sec_mode}' → intruder 억제"
                         )
@@ -494,6 +631,7 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
                 sg_status = _smartgate_manager.status
                 if sg_status.get("in_cooldown", False):
                     _suppress_intruder = True
+                    _suppress_reason   = "cooldown"
                     logger.debug(
                         "[CameraStream] 쿨다운 중 intruder → clear 억제 "
                         f"(conf={_conf:.0%})"
@@ -503,12 +641,21 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
             if not _suppress_intruder and _last_known_time > 0:
                 if (time.time() - _last_known_time) < _KNOWN_SUPPRESS_SEC:
                     _suppress_intruder = True
+                    _suppress_reason   = "known_recent"
                     logger.debug(
                         f"[CameraStream] known 감지 후 {time.time() - _last_known_time:.0f}s → "
                         f"intruder 억제 (conf={_conf:.0%})"
                     )
 
             if _suppress_intruder:
+                # dnd 억제 시: cooldown 갱신 + 로그 기록 후 label → clear
+                # (cooldown 미갱신 시 30초 후 억제 없이 알람 재발생하는 버그 방지)
+                if _suppress_reason == "dnd":
+                    if now - cooldown["intruder"] > COOLDOWN_SEC["intruder"]:
+                        cooldown["intruder"] = now
+                        logger.debug(
+                            "[CameraStream] 방해금지 모드 — intruder 쿨다운 갱신 + 알람/TTS 억제"
+                        )
                 label = "clear"
                 verdict["label"] = "clear"
                 with _verdict_lock:
@@ -549,11 +696,14 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
                 cooldown["known"] = now
                 logger.info(f"[CameraStream] ✅ KNOWN: {_name} (conf={_conf:.0%})")
         elif label == "intruder":
+            # dnd 억제는 위에서 처리됨 → 여기 도달 시 억제 없는 실제 intruder
             if now - cooldown["unknown"] > COOLDOWN_SEC["unknown"]:
                 cooldown["unknown"] = now
                 logger.warning(f"[CameraStream] ❓ UNKNOWN 인물 감지 (conf={_conf:.0%})")
 
         # ── 알람 브로드캐스트 ──
+        # dnd 억제는 위 _suppress_intruder 블록에서 처리됨
+        # 이 블록 도달 시 label == "intruder" 이면 반드시 알람 발생 대상
         if label == "intruder":
             if now - cooldown["intruder"] > COOLDOWN_SEC["intruder"]:
                 cooldown["intruder"] = now
@@ -640,6 +790,39 @@ async def mjpeg_generator():
         yield (b"--frame\r\n"
                b"Content-Type: image/jpeg\r\n\r\n" +
                buf.tobytes() + b"\r\n")
+
+
+# ──────────────────────────────────────────
+# Raw MJPEG 제너레이터 (지연 최소)
+# 디코드/오버레이/재인코딩 없이 _latest_frame 바이트를 그대로 전송
+# → /camera/entrance/raw 에서 사용
+# ──────────────────────────────────────────
+async def mjpeg_raw_generator():
+    """원본 JPEG을 재인코딩 없이 MJPEG으로 전송 — 지연 최소"""
+    interval    = 1.0 / STREAM_FPS_LIMIT
+    last_sent   = None
+    placeholder = _make_placeholder()
+
+    while True:
+        await asyncio.sleep(interval)
+
+        with _frame_lock:
+            jpeg_bytes = _latest_frame
+
+        if jpeg_bytes is None:
+            yield (b"--frame\r\n"
+                   b"Content-Type: image/jpeg\r\n\r\n" +
+                   placeholder + b"\r\n")
+            await asyncio.sleep(1.0)
+            continue
+
+        if jpeg_bytes is last_sent:
+            continue
+        last_sent = jpeg_bytes
+
+        yield (b"--frame\r\n"
+               b"Content-Type: image/jpeg\r\n\r\n" +
+               jpeg_bytes + b"\r\n")
 
 
 def _make_placeholder() -> bytes:

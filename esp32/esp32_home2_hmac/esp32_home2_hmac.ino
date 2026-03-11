@@ -1,0 +1,614 @@
+/*
+ * esp32_client.ino
+ * ================
+ * Voice IoT Controller - ESP32 단일 통합 클라이언트
+ *
+ * 역할:
+ *   - WiFi 연결 후 TCP 서버에 접속
+ *   - ESP32 1개로 5개 공간 전체 제어
+ *   - device_id = "esp32_home" 으로 통합 등록
+ *   - JSON 명령의 "room" 필드로 공간 구분 → 해당 핀 제어
+ *
+ * 공간별 핀 배정 (활성):
+ *   거실  (living)   : LED GPIO 2
+ *   욕실  (bathroom) : LED GPIO 4
+ *   침실  (bedroom)  : Stepper GPIO 5, 18, 19, 21 (커튼)
+ *   차고  (garage)   : LED GPIO 12 / Servo GPIO 15
+ *   현관  (entrance) : LED GPIO 13 / Servo GPIO 16
+ *   PIR               : GPIO 27
+ *
+ * 의존 라이브러리 (Arduino Library Manager):
+ *   - ArduinoJson     (6.x)
+ *   - ESP32Servo
+ *
+ * 작성일: 2026-02-20
+ * 수정일: 2026-02-22  단일 ESP32 통합 버전 (5개 공간 통합)
+ * 수정일: 2026-02-22  PIR 센서 추가 (재실 감지 / 방범 모드)
+ *
+ * PIR 센서 (HC-SR501):
+ *   GPIO 27  — PIR 신호 입력
+ *   재실 모드: 일정 시간 움직임 없으면 서버에 이벤트 전송
+ *   방범 모드: 움직임 감지 시 서버에 이벤트 전송 + 전체 조명 ON
+ */
+
+#include <WiFi.h>
+#include <ArduinoJson.h>
+#include <ESP32Servo.h>
+#include "config.h"          // WiFi/서버 민감정보 (config.h.example 참조)
+// #include <TM1637Display.h>  // 미사용
+#include "mbedtls/md.h"      // HMAC-SHA256 (ESP-IDF 내장, 설치 불필요)
+
+// ── HMAC 서명 검증 설정 ───────────────────────────────────────────
+// config.h 에 아래 줄 추가:
+//   #define ESP32_SECRET "서버 .env의 ESP32_SECRET 값과 동일하게"
+#ifndef ESP32_SECRET
+  #define ESP32_SECRET ""     // 빈 문자열 = HMAC 검증 비활성 (개발용)
+#endif
+#define HMAC_TIMESTAMP_TOLERANCE 30  // 허용 타임스탬프 오차 (초)
+
+
+// ================================================================
+// Config — 여기만 수정
+// ================================================================
+
+
+
+// WiFi/서버 설정은 config.h 에서 관리
+// ── TCP 서버 ──────────────────────────────────────────────────────
+#define SERVER_PORT    9000
+
+// ── 디바이스 ID ───────────────────────────────────────────────────
+#define DEVICE_ID      "esp32_home2"
+//#define CAPS_STR       "[\"led\",\"servo\",\"seg7\"]"
+#define CAPS_STR       "[\"led\",\"servo\"]"
+
+// ── 타이밍 ────────────────────────────────────────────────────────
+#define RECONNECT_DELAY_MS  3000
+
+
+// ================================================================
+// 핀 배정
+// ================================================================
+
+// ── LED (공간별) ──────────────────────────────────────────────────
+#define PIN_LED_LIVING    12
+#define PIN_LED_BATHROOM  26
+#define PIN_LED_BEDROOM   14  // 침실 LED 비활성 (커튼 스텝모터와 핀 간섭 가능성 대비)
+#define PIN_LED_GARAGE    13
+#define PIN_LED_ENTRANCE  25
+
+// ── 스텝모터 (침실 커튼) ──────────────────────────────────────
+#define PIN_SP_IN1   5
+#define PIN_SP_IN2   18
+#define PIN_SP_IN3   19
+#define PIN_SP_IN4   21
+
+// ── 서보 (공간별) ─────────────────────────────────────────────────
+//#define PIN_SERVO_BEDROOM   14   // 커튼
+#define PIN_SERVO_GARAGE    15   // 차고문
+#define PIN_SERVO_ENTRANCE  2   // 현관문
+
+// ── TM1637 7세그먼트 (욕실) ───────────────────────────────────────
+//#define PIN_SEG7_CLK  22
+//#define PIN_SEG7_DIO  23
+
+// ── PIR 센서 ─────────────────────────────────────────────────────
+#define PIN_PIR            4   // HC-SR501 OUT 핀 (GPIO27)
+
+// ── PIR 모드 정의 ─────────────────────────────────────────────────
+#define PIR_MODE_OFF      0   // 비활성
+#define PIR_MODE_PRESENCE 1   // 재실 감지 (정적 이상 감지)
+#define PIR_MODE_GUARD    2   // 방범 모드 (외출 시 침입 감지)
+
+// ── PIR 타이밍 설정 ───────────────────────────────────────────────
+#define PIR_STATIC_TIMEOUT_MS   (4UL * 60 * 60 * 1000)  // 재실: 4시간 무움직임 → 이상
+#define PIR_ALERT_COOLDOWN_MS   (30UL * 1000)            // 알림 재전송 방지 쿨다운 30초
+
+
+// ================================================================
+// 전역 객체
+// ================================================================
+
+WiFiClient tcpClient;
+
+//Servo servoBedroom;
+Servo servoGarage;
+Servo servoEntrance;
+
+// ── 스텝모터 상태 변수 (침실 커튼) ──────────────────────────────────
+#define SP_TARGET_STEPS  7026
+#define SP_BACKLASH      50
+#define SP_DELAY_US      1200
+
+bool spRunning    = false;
+bool spDirCW      = true;     // 토글 방향
+long spStepsDone  = 0;
+long spTarget     = 0;
+int  spSeqIdx     = 0;
+unsigned long spLastStepUs = 0;
+
+// 하프스텝 시퀀스 (8단계)
+const byte SP_SEQ[8][4] = {
+  {1, 0, 0, 0}, {1, 1, 0, 0}, {0, 1, 0, 0}, {0, 1, 1, 0},
+  {0, 0, 1, 0}, {0, 0, 1, 1}, {0, 0, 0, 1}, {1, 0, 0, 1}
+};
+
+//TM1637Display seg7(PIN_SEG7_CLK, PIN_SEG7_DIO);
+
+String rxBuffer = "";
+
+// ── PIR 상태 변수 ─────────────────────────────────────────────────
+int           pirMode          = PIR_MODE_OFF;
+unsigned long lastMotionTime   = 0;   // 마지막 움직임 감지 시각
+unsigned long lastAlertTime    = 0;   // 마지막 알림 전송 시각
+bool          pirAlertSent     = false;
+
+
+// ================================================================
+// setup
+// ================================================================
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+  Serial.println("\n[Boot] " DEVICE_ID " — 통합 5개 공간");
+
+  // ── LED 핀 초기화 ────────────────────────────────────────────
+  int ledPins[] = {
+    PIN_LED_LIVING, PIN_LED_BATHROOM, PIN_LED_BEDROOM,
+    PIN_LED_GARAGE, PIN_LED_ENTRANCE
+  };
+  for (int i = 0; i < 5; i++) {
+    pinMode(ledPins[i], OUTPUT);
+    digitalWrite(ledPins[i], LOW);
+  }
+  Serial.println("[LED] 5개 핀 초기화 완료");
+
+  // ── 서보 초기화 (차고 + 현관) ────────────────────────────────
+  servoGarage.attach(PIN_SERVO_GARAGE);
+  servoEntrance.attach(PIN_SERVO_ENTRANCE);
+  servoGarage.write(0);
+  servoEntrance.write(0);
+  Serial.println("[SERVO] 2개 초기화 완료 (차고/현관)");
+
+  // ── PIR 초기화 ───────────────────────────────────────────────
+  pinMode(PIN_PIR, INPUT);
+  lastMotionTime = millis();
+  Serial.println("[PIR] 초기화 완료 (GPIO27) - 캘리브레이션 대기 중...");
+  delay(2000);  // 간단 캘리브레이션 대기
+  // 첫 감지 즉시 발동 보장: 쿨다운이 이미 지난 것으로 설정
+  lastAlertTime = millis() - PIR_ALERT_COOLDOWN_MS;
+  Serial.println("[PIR] 준비 완료");
+
+  // ── 스텝모터 초기화 (침실 커튼) ──────────────────────────────
+  pinMode(PIN_SP_IN1, OUTPUT);
+  pinMode(PIN_SP_IN2, OUTPUT);
+  pinMode(PIN_SP_IN3, OUTPUT);
+  pinMode(PIN_SP_IN4, OUTPUT);
+  releaseStepper();
+  Serial.println("[STEPPER] 침실 커튼 초기화 완료 (GPIO 5, 18, 19, 21)");
+
+  connectWiFi();
+  connectServer();
+}
+
+
+// ================================================================
+// loop
+// ================================================================
+
+void loop() {
+  if (!tcpClient.connected()) {
+    Serial.println("[TCP] 연결 끊김 - 재연결 시도");
+    delay(RECONNECT_DELAY_MS);
+    connectServer();
+    return;
+  }
+
+  while (tcpClient.available()) {
+    char c = tcpClient.read();
+    if (c == '\n') {
+      processCommand(rxBuffer);
+      rxBuffer = "";
+    } else {
+      rxBuffer += c;
+    }
+  }
+
+  // PIR 감지 처리
+  handlePir();
+
+  // ── 스텝모터 틱 (비차단형) ──────────────────────────────────
+  updateStepper();
+}
+
+
+// ================================================================
+// WiFi 연결
+// ================================================================
+
+void connectWiFi() {
+  Serial.printf("[WiFi] 연결 중: %s\n", WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  int retry = 0;
+  while (WiFi.status() != WL_CONNECTED && retry < 20) {
+    delay(500);
+    Serial.print(".");
+    retry++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("\n[WiFi] 연결 성공: %s\n", WiFi.localIP().toString().c_str());
+  } else {
+    Serial.println("\n[WiFi] 연결 실패 - 재시작");
+    ESP.restart();
+  }
+}
+
+
+// ================================================================
+// TCP 서버 연결 + 등록
+// ================================================================
+
+void connectServer() {
+  Serial.printf("[TCP] 서버 연결: %s:%d\n", SERVER_IP, SERVER_PORT);
+
+  if (!tcpClient.connect(SERVER_IP, SERVER_PORT)) {
+    Serial.println("[TCP] 연결 실패");
+    return;
+  }
+
+  Serial.println("[TCP] 연결 성공");
+  sendRegister();
+}
+
+void sendRegister() {
+  String msg = "{\"type\":\"register\",\"device_id\":\"";
+  msg += DEVICE_ID;
+  msg += "\",\"caps\":";
+  msg += CAPS_STR;
+  msg += "}\n";
+  tcpClient.print(msg);
+  Serial.printf("[TCP] 등록: %s", msg.c_str());
+}
+
+
+// ================================================================
+// HMAC-SHA256 검증 함수 (v3.2)
+// ================================================================
+
+String computeHMAC(const char* secret, const String& ts, const String& payload) {
+  String msg = ts + "." + payload;
+  unsigned char result[32];
+  mbedtls_md_context_t ctx;
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  mbedtls_md_init(&ctx);
+  mbedtls_md_setup(&ctx, info, 1);
+  mbedtls_md_hmac_starts(&ctx, (const unsigned char*)secret, strlen(secret));
+  mbedtls_md_hmac_update(&ctx, (const unsigned char*)msg.c_str(), msg.length());
+  mbedtls_md_hmac_finish(&ctx, result);
+  mbedtls_md_free(&ctx);
+  String hex = "";
+  for (int i = 0; i < 32; i++) {
+    char buf[3];
+    sprintf(buf, "%02x", result[i]);
+    hex += buf;
+  }
+  return hex;
+}
+
+bool verifyAndExtract(const String& raw, StaticJsonDocument<512>& outDoc) {
+  const char* secret = ESP32_SECRET;
+
+  if (strlen(secret) == 0) {
+    DeserializationError err = deserializeJson(outDoc, raw);
+    return (err == DeserializationError::Ok);
+  }
+
+  StaticJsonDocument<512> wrapper;
+  DeserializationError err = deserializeJson(wrapper, raw);
+  if (err) {
+    Serial.println("[HMAC] 래퍼 JSON 파싱 실패");
+    return false;
+  }
+
+  const char* ts  = wrapper["ts"]  | "";
+  const char* sig = wrapper["sig"] | "";
+  if (strlen(ts) == 0 || strlen(sig) == 0) {
+    Serial.println("[HMAC] 서명 없음 — 평문 패킷으로 처리");
+    outDoc.set(wrapper);
+    return true;
+  }
+
+  String payloadStr;
+  serializeJson(wrapper["cmd"], payloadStr);
+  String expected = computeHMAC(secret, String(ts), payloadStr);
+
+  if (expected != String(sig)) {
+    Serial.printf("[HMAC] 서명 불일치 — 패킷 거부\n  expected: %s\n  received: %s\n",
+                  expected.c_str(), sig);
+    sendError("hmac_auth_failed");
+    return false;
+  }
+
+  Serial.println("[HMAC] 서명 검증 통과 ✓");
+  outDoc.set(wrapper["cmd"]);
+  return true;
+}
+
+
+// ================================================================
+// 명령 처리 (v3.2: HMAC 검증 추가)
+// ================================================================
+
+void processCommand(String raw) {
+  raw.trim();
+  if (raw.length() == 0) return;
+
+  Serial.printf("[CMD] 수신: %s\n", raw.c_str());
+
+  // ── HMAC 검증 + cmd 추출 ──────────────────────────────────────
+  StaticJsonDocument<512> doc;
+  if (!verifyAndExtract(raw, doc)) {
+    return;
+  }
+
+  const char* cmd  = doc["cmd"];
+  const char* room = doc["room"] | "";
+
+  if (!cmd) {
+    sendError("missing cmd field");
+    return;
+  }
+
+  // ── LED ───────────────────────────────────────────────────────
+  if (strcmp(cmd, "led") == 0) {
+    int pin = resolveLedPin(room);
+    if (pin < 0) { sendError("unknown room for led"); return; }
+    const char* state = doc["state"] | "off";
+    cmdLed(pin, strcmp(state, "on") == 0, room);
+    sendAck("led", "ok");
+
+  // ── SERVO ─────────────────────────────────────────────────────
+  } else if (strcmp(cmd, "servo") == 0) {
+    if (strcmp(room, "bedroom") == 0) {
+      if (!spRunning) {
+        spRunning   = true;
+        spStepsDone = 0;
+        spTarget    = SP_TARGET_STEPS + SP_BACKLASH;
+        Serial.printf("[STEPPER] 커튼 이동 시작 (방향: %s, 목표: %ld)\n", 
+                      spDirCW ? "CW" : "CCW", spTarget);
+      }
+      sendAck("servo", "ok");
+    } else {
+      Servo* sv = resolveServo(room);
+      if (!sv) { sendError("unknown room for servo"); return; }
+      int angle = doc["angle"] | 0;
+      angle = constrain(angle, 0, 180);
+      cmdServo(sv, angle, room);
+      sendAck("servo", "ok");
+    }
+
+  // ── SEG7 ──────────────────────────────────────────────────────
+  // } else if (strcmp(cmd, "seg7") == 0) {
+  //  const char* mode = doc["mode"]  | "num";
+  //  float       val  = doc["value"] | 0.0f;
+  // cmdSeg7(mode, val);
+  //  sendAck("seg7", "ok");
+
+  // ── PIR 모드 설정 ─────────────────────────────────────────────
+  } else if (strcmp(cmd, "pir_mode") == 0) {
+    const char* mode = doc["mode"] | "off";
+    cmdPirMode(mode);
+    sendAck("pir_mode", "ok");
+
+  } else {
+    Serial.printf("[CMD] 알 수 없는 명령: %s\n", cmd);
+    sendError("unknown cmd");
+  }
+}
+
+
+// ================================================================
+// room → LED 핀 매핑
+// ================================================================
+
+int resolveLedPin(const char* room) {
+  if (strcmp(room, "living")   == 0) return PIN_LED_LIVING;
+  if (strcmp(room, "bathroom") == 0) return PIN_LED_BATHROOM;
+  if (strcmp(room, "bedroom")  == 0) return PIN_LED_BEDROOM;
+  if (strcmp(room, "garage")   == 0) return PIN_LED_GARAGE;
+  if (strcmp(room, "entrance") == 0) return PIN_LED_ENTRANCE;
+  return -1;
+}
+
+
+// ================================================================
+// room → Servo 객체 매핑
+// ================================================================
+
+Servo* resolveServo(const char* room) {
+  // if (strcmp(room, "bedroom") == 0) return &servoBedroom;  // 미사용
+  if (strcmp(room, "garage")   == 0) return &servoGarage;
+  if (strcmp(room, "entrance") == 0) return &servoEntrance;
+  return nullptr;
+}
+
+
+// ================================================================
+// PIR 센서 처리
+// ================================================================
+
+void handlePir() {
+  static bool prevMotion = false;  // 직전 프레임 감지 상태 (상승 엣지 감지용)
+
+  bool motionDetected = (digitalRead(PIN_PIR) == HIGH);
+  unsigned long now   = millis();
+
+  // LOW → HIGH 상승 엣지: 모드에 관계없이 서버에 기본 motion_detected 이벤트 전송
+  if (motionDetected && !prevMotion) {
+    Serial.println("[PIR] 감지가 되었다");
+    if (now - lastAlertTime > PIR_ALERT_COOLDOWN_MS) {
+      sendPirEvent("motion_detected", "rising_edge");
+      lastAlertTime = now;
+    }
+  }
+  prevMotion = motionDetected;
+
+  if (pirMode == PIR_MODE_OFF) return;
+
+  if (motionDetected) {
+    lastMotionTime = now;
+    pirAlertSent   = false;  // 움직임 있으면 알림 플래그 초기화
+
+    // 방범 모드: 움직임 감지 → 즉시 알림
+    if (pirMode == PIR_MODE_GUARD) {
+      if (now - lastAlertTime > PIR_ALERT_COOLDOWN_MS) {
+        Serial.println("[PIR] 🚨 방범모드 - 움직임 감지!");
+        allLightsOn();
+        sendPirEvent("guard_alert", "motion_detected");
+        lastAlertTime = now;
+      }
+    }
+
+  } else {
+    // 재실 모드: 4시간 이상 정적 → 이상 감지
+    if (pirMode == PIR_MODE_PRESENCE && !pirAlertSent) {
+      if (now - lastMotionTime > PIR_STATIC_TIMEOUT_MS) {
+        Serial.println("[PIR] ⚠️ 재실모드 - 장시간 정적 감지!");
+        sendPirEvent("presence_alert", "static_too_long");
+        pirAlertSent  = true;
+        lastAlertTime = now;
+      }
+    }
+  }
+}
+
+void cmdPirMode(const char* mode) {
+  if (strcmp(mode, "presence") == 0) {
+    pirMode        = PIR_MODE_PRESENCE;
+    lastMotionTime = millis();
+    pirAlertSent   = false;
+    Serial.println("[PIR] 재실 감지 모드 ON");
+  } else if (strcmp(mode, "guard") == 0) {
+    pirMode        = PIR_MODE_GUARD;
+    pirAlertSent   = false;
+    Serial.println("[PIR] 방범 모드 ON");
+  } else {
+    pirMode = PIR_MODE_OFF;
+    Serial.println("[PIR] 모드 OFF");
+  }
+}
+
+void allLightsOn() {
+  int ledPins[] = {
+    PIN_LED_LIVING, PIN_LED_BATHROOM, PIN_LED_BEDROOM,
+    PIN_LED_GARAGE, PIN_LED_ENTRANCE
+  };
+  for (int i = 0; i < 5; i++) {
+    digitalWrite(ledPins[i], HIGH);
+  }
+  Serial.println("[PIR] 전체 조명 ON");
+}
+
+void sendPirEvent(const char* eventType, const char* detail) {
+  if (!tcpClient.connected()) return;
+  String msg = "{\"type\":\"pir_event\",\"location\":\"pir_gate\",\"event\":\"";
+  msg += eventType;
+  msg += "\",\"detail\":\"";
+  msg += detail;
+  msg += "\",\"device_id\":\"";
+  msg += DEVICE_ID;
+  msg += "\"}\n";
+  tcpClient.print(msg);
+  Serial.printf("[PIR] 이벤트 전송: %s / %s (pir_gate)\n", eventType, detail);
+}
+
+// ================================================================
+// 디바이스 제어 함수
+// ================================================================
+
+// ================================================================
+// 스텝모터 제어 헬퍼
+// ================================================================
+
+void writeStepperStep(int idx) {
+  digitalWrite(PIN_SP_IN1, SP_SEQ[idx][0]);
+  digitalWrite(PIN_SP_IN2, SP_SEQ[idx][1]);
+  digitalWrite(PIN_SP_IN3, SP_SEQ[idx][2]);
+  digitalWrite(PIN_SP_IN4, SP_SEQ[idx][3]);
+}
+
+void releaseStepper() {
+  digitalWrite(PIN_SP_IN1, LOW); digitalWrite(PIN_SP_IN2, LOW);
+  digitalWrite(PIN_SP_IN3, LOW); digitalWrite(PIN_SP_IN4, LOW);
+}
+
+void updateStepper() {
+  if (!spRunning) return;
+
+  unsigned long now = micros();
+  if (now - spLastStepUs >= SP_DELAY_US) {
+    spLastStepUs = now;
+
+    writeStepperStep(spSeqIdx);
+    
+    if (spDirCW) spSeqIdx = (spSeqIdx + 1) % 8;
+    else         spSeqIdx = (spSeqIdx + 7) % 8;
+
+    spStepsDone++;
+
+    if (spStepsDone >= spTarget) {
+      spRunning = false;
+      releaseStepper();
+      spDirCW = !spDirCW; // 방향 반전
+      Serial.println("[STEPPER] 이동 완료 및 자동 정지");
+    }
+  }
+}
+
+void cmdLed(int pin, bool on, const char* room) {
+  digitalWrite(pin, on ? HIGH : LOW);
+  Serial.printf("[LED] %s GPIO%d → %s\n", room, pin, on ? "ON" : "OFF");
+}
+
+void cmdServo(Servo* sv, int angle, const char* room) {
+  sv->write(angle);
+  Serial.printf("[SERVO] %s → %d도\n", room, angle);
+}
+
+//void cmdSeg7(const char* mode, float value) {
+//  if (strcmp(mode, "off") == 0) {
+//    seg7.clear();
+//   Serial.println("[SEG7] OFF");
+//   return;
+//  }
+// // 소수점 1자리 표시: 23.5 → 235 + 소수점
+//  int display_val = (int)(value * 10);
+//  seg7.showNumberDecEx(display_val, 0b01000000, false, 4, 0);
+//  Serial.printf("[SEG7] mode=%s value=%.1f\n", mode, value);
+//}
+
+
+// ================================================================
+// TCP 응답 전송 유틸
+// ================================================================
+
+void sendAck(const char* cmd, const char* status) {
+  String msg = "{\"type\":\"ack\",\"cmd\":\"";
+  msg += cmd;
+  msg += "\",\"status\":\"";
+  msg += status;
+  msg += "\"}\n";
+  tcpClient.print(msg);
+  Serial.printf("[ACK] cmd=%s status=%s\n", cmd, status);
+}
+
+void sendError(const char* errMsg) {
+  String msg = "{\"type\":\"error\",\"msg\":\"";
+  msg += errMsg;
+  msg += "\"}\n";
+  tcpClient.print(msg);
+  Serial.printf("[ERR] %s\n", errMsg);
+}
