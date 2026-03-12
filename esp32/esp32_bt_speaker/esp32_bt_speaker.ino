@@ -11,7 +11,7 @@
  *   - arduino-libhelix (https://github.com/pschatzmann/arduino-libhelix)
  *
  * 보드 설정 (아두이노 IDE):
- *   - 보드: ESP32 Wrover Kit
+ *   - 보드: ESP32 Wrover Module
  *   - Partition Scheme: Huge APP
  *   - Upload Speed: 921600
  */
@@ -26,7 +26,7 @@
 #include "MP3DecoderHelix.h"
 
 // ===== Volume =====
-static volatile int volumePercent = 80;  // 0~100
+static volatile int volumePercent = 5;  // 0~100
 
 // ===== PCM Ring Buffer (PSRAM) =====
 #define PCM_BUF_SIZE      (1024 * 128)   // 256KB 링 버퍼

@@ -156,12 +156,20 @@ echo ""
 
 # ── YouTube → MP3 중계 서버 (relay_server) ──
 if [ -n "$RELAY_PORT" ]; then
+  # relay venv 자동 생성 (.relay-venv 없으면 생성 후 flask, yt-dlp 설치)
+  if [ ! -f ".relay-venv/bin/python3" ]; then
+    echo "Relay venv 생성 중 (.relay-venv)..."
+    python3 -m venv .relay-venv
+    .relay-venv/bin/python3 -m ensurepip --upgrade >/dev/null 2>&1
+    .relay-venv/bin/python3 -m pip install --quiet flask yt-dlp
+    echo "Relay venv 생성 완료 (flask, yt-dlp 설치됨)"
+  fi
+
   if command -v lsof &>/dev/null && lsof -i :"$RELAY_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
     echo "Relay 서버: 포트 $RELAY_PORT 이미 사용 중 — 스킵"
   else
     echo "Relay 서버 시작 중 (port $RELAY_PORT)..."
-    RELAY_PYTHON="python3"
-    [ -f ".relay-venv/bin/python3" ] && RELAY_PYTHON=".relay-venv/bin/python3"
+    RELAY_PYTHON=".relay-venv/bin/python3"
     nohup $RELAY_PYTHON scripts/relay_server.py > /tmp/relay_server.log 2>&1 &
     RELAY_PID=$!
     sleep 2
@@ -173,6 +181,17 @@ if [ -n "$RELAY_PORT" ]; then
   fi
 else
   echo "Relay 서버: RELAY_PORT 미설정 — 스킵"
+fi
+
+# ── BT Speaker 초기 볼륨 설정 ──
+BT_SPEAKER_URL="${BT_SPEAKER_URL:-}"
+if [ -n "$BT_SPEAKER_URL" ]; then
+  BT_DEFAULT_VOL=5
+  if curl -s --max-time 3 -X POST "${BT_SPEAKER_URL}/volume" -d "v=${BT_DEFAULT_VOL}" >/dev/null 2>&1; then
+    echo "BT Speaker 초기 볼륨: ${BT_DEFAULT_VOL}%"
+  else
+    echo "BT Speaker 볼륨 설정 스킵 (ESP32 미응답)"
+  fi
 fi
 
 # uvicorn 백그라운드 실행
