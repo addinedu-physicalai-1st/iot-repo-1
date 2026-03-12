@@ -264,17 +264,15 @@ def create_router(tcp_server, ws_hub, command_router, db_logger=None, smartgate_
                 status="warn",
                 msg="STTEngine 비활성화 상태 (DISABLE_STT=1)"
             )
-        if stt.state != "IDLE":
-            return CommandResponse(
-                status="ok",
-                msg=f"STT 이미 활성화 중: {stt.state}"
-            )
 
+        # activate()가 내부적으로 상태/transcribing을 판단 (pending_activate 큐잉 포함)
         stt.activate()
-        await ws_hub.broadcast(
-            '{"type":"wake_detected","msg":"버튼 트리거 → 명령을 말씀하세요"}'
-        )
-        return CommandResponse(status="ok", msg="STT LISTENING 활성화")
+        # LISTENING 전환 시에만 wake_detected 브로드캐스트
+        if stt.state == "LISTENING":
+            await ws_hub.broadcast(
+                '{"type":"wake_detected","msg":"버튼 트리거 → 명령을 말씀하세요"}'
+            )
+        return CommandResponse(status="ok", msg="STT activate 호출 완료")
 
     def _get_stt_state():
         try:

@@ -1004,11 +1004,10 @@ class CommandRouter:
             stt = None
         if stt is None:
             return ws_cmd_result("warn", "STTEngine 비활성화")
-        if stt.state != "IDLE":
-            return ws_cmd_result("ok", f"STT 이미 활성화: {stt.state}")
+        # activate()가 내부적으로 상태/transcribing을 판단 (pending_activate 큐잉 포함)
         stt.activate()
-        logger.info("[Router] WS 버튼 트리거 → STT LISTENING 활성화")
-        return ws_cmd_result("ok", "STT LISTENING 활성화")
+        logger.info("[Router] WS 버튼 트리거 → STT activate() 호출")
+        return ws_cmd_result("ok", "STT activate 호출 완료")
 
     async def _handle_audio_chunk(self, data: dict) -> None:
         """

@@ -1,5 +1,5 @@
 """
-server/stt_engine.py  v4.3
+server/stt_engine.py  v4.4
 ==================================
 Porcupine 웨이크 워드 + Whisper STT + VAD + noisereduce
 + 디버그 모드 (음성 인식 품질 분석용)
@@ -10,6 +10,12 @@ v4.1-debug 추가사항:
 v4.3 변경사항:
   VAD_MAX_SPEECH_SEC: 10 → 5초 (강제 종료 대기 단축)
   VAD_SILENCE_SEC: 1.2 → 0.8초 (무음 종료 판정 단축)
+
+v4.4 변경사항:
+  asyncio.Lock 도입 → 상태 전환 원자성 보장
+  activate() 교착 방지: transcribing 중에도 pending_activate 큐잉
+  dedicated timeout task → polling 기반 타임아웃 제거
+  _force_idle() 중앙 복귀 메서드 → 어떤 경로든 IDLE 복귀 보장
 
   [DBG-WAKE]  웨이크워드 감지 타임스탬프, 모드(porcupine / button)
   [DBG-VAD]   매 청크 energy, 발화시작/종료, 무음 경과시간
@@ -74,6 +80,20 @@ NOISE_PROFILE_SIZE = int(SAMPLE_RATE * NOISE_PROFILE_SEC)
 
 STATE_IDLE      = "IDLE"
 STATE_LISTENING = "LISTENING"
+
+# ─────────────────────────────────────────────
+# Whisper 한국어 IoT 컨텍스트 프롬프트
+# ─────────────────────────────────────────────
+# initial_prompt: Whisper 디코더에 도메인 어휘 힌트 제공
+# → 동음이의어/유사발음 오인식 대폭 감소 (base 모델 기준 30~50% 개선)
+_WHISPER_KO_PROMPT = (
+    "거실 전등 켜줘. 침실 불 꺼줘. 욕실 조명 켜줘. 차고 문 열어줘. 현관문 닫아줘. "
+    "커튼 열어줘. 커튼 닫아줘. 온도 알려줘. 습도 알려줘. "
+    "외출 모드로 바꿔줘. 방해금지 모드로 바꿔줘. 귀가 모드로 바꿔줘. "
+    "취침 모드로 바꿔줘. 기상 모드로 바꿔줘. "
+    "전체 불 꺼줘. 전등 꺼줘. 문 열어줘. 문 닫아줘. "
+    "자비스야, 거실 전등 켜줘."
+)
 
 
 # ─────────────────────────────────────────────
@@ -228,6 +248,10 @@ class STTEngine:
         self._state = STATE_IDLE
         self._listen_start: Optional[float] = None  # 버튼/웨이크 트리거 시각
         self._transcribing = False  # Whisper 추론 중 플래그
+        self._pending_activate = False  # transcribing 중 activate 요청 큐잉
+        self._force_idle_flag = False   # timeout에서 process_loop 로컬 변수 리셋 신호
+        self._lock = asyncio.Lock()  # 상태 전환 원자성 보장
+        self._timeout_task: Optional[asyncio.Task] = None  # LISTENING 타임아웃 전용 태스크
         self._audio_queue: asyncio.Queue = asyncio.Queue()
 
         self._nr_available      = False
@@ -302,6 +326,7 @@ class STTEngine:
     async def stop(self):
         """STT 엔진 종료 + 세션 통계 출력"""
         self._running = False
+        self._cancel_listening_timeout()
         if self._stream:
             self._stream.stop()
             self._stream.close()
@@ -368,10 +393,37 @@ class STTEngine:
                 self._audio_queue.put(chunk), self._loop
             )
 
+    def ensure_mic_stream(self):
+        """마이크 스트림이 죽었으면 재시작 (sd.stop() 글로벌 중단 복구용)"""
+        if self.wake_source == "browser" or not self._running:
+            return
+        if self._stream is None or not self._stream.active:
+            logger.warning("[STT] 마이크 스트림 비활성 감지 → 재시작")
+            try:
+                if self._stream is not None:
+                    try:
+                        self._stream.close()
+                    except Exception:
+                        pass
+                self._stream = sd.RawInputStream(
+                    samplerate=SAMPLE_RATE,
+                    channels=CHANNELS,
+                    dtype=DTYPE_INT16,
+                    blocksize=PORCUPINE_FRAME_SIZE,
+                    device=self.mic_device,
+                    callback=self._audio_callback,
+                )
+                self._stream.start()
+                logger.info("[STT] 마이크 스트림 재시작 완료")
+            except Exception as e:
+                logger.error(f"[STT] 마이크 스트림 재시작 실패: {e}")
+
     def activate(self):
-        """버튼 모드: 외부 트리거 → 직접 LISTENING 전환"""
+        """버튼 모드: 외부 트리거 → 직접 LISTENING 전환 (교착 방지)"""
         if self._transcribing:
-            logger.info("[STT] 명령 처리 중 — 버튼 무시")
+            # Whisper 추론 중이면 완료 후 자동 활성화되도록 예약
+            self._pending_activate = True
+            logger.info("[STT] 명령 처리 중 — 완료 후 자동 활성화 예약")
             return
         if self._state == STATE_IDLE:
             self._state    = STATE_LISTENING
@@ -379,6 +431,7 @@ class STTEngine:
             self._t_wake   = time.time()
             self._listen_start = time.time()
             self._stats.wake_mode_counts["button"] += 1
+            self._start_listening_timeout()
             logger.info("[STT] 외부 트리거(버튼) → LISTENING 활성화")
             self._d("DBG-WAKE", f"mode=button | t={self._t_wake:.3f} | IDLE→LISTENING")
 
@@ -464,6 +517,46 @@ class STTEngine:
             )
 
     # ════════════════════════════════════════════
+    # 상태 전환 헬퍼
+    # ════════════════════════════════════════════
+
+    def _start_listening_timeout(self):
+        """LISTENING 진입 시 전용 타임아웃 태스크 시작"""
+        self._cancel_listening_timeout()
+        if self._loop and self._loop.is_running():
+            self._timeout_task = self._loop.create_task(self._listening_timeout())
+
+    def _cancel_listening_timeout(self):
+        """타임아웃 태스크 취소"""
+        if self._timeout_task and not self._timeout_task.done():
+            self._timeout_task.cancel()
+        self._timeout_task = None
+
+    async def _listening_timeout(self):
+        """WAKE_LISTEN_SEC 후 LISTENING 상태이면 강제 IDLE 복귀"""
+        try:
+            await asyncio.sleep(WAKE_LISTEN_SEC)
+        except asyncio.CancelledError:
+            return
+        if self._state == STATE_LISTENING:
+            logger.info("[STT] 명령 대기 타임아웃 → IDLE")
+            self._d("DBG-WAKE",
+                    f"TIMEOUT | mode={self._wake_mode} | → IDLE")
+            await self._force_idle()
+
+    async def _force_idle(self):
+        """어떤 경로에서든 안전하게 IDLE 복귀 (중앙 복귀 메서드)"""
+        self._state = STATE_IDLE
+        self._listen_start = None
+        self._force_idle_flag = True  # process_loop에 로컬 변수 리셋 신호
+        self._cancel_listening_timeout()
+        if self.on_timeout:
+            try:
+                await self.on_timeout()
+            except Exception as e:
+                logger.error(f"[STT] _force_idle on_timeout 오류: {e}")
+
+    # ════════════════════════════════════════════
     # 메인 처리 루프
     # ════════════════════════════════════════════
 
@@ -476,95 +569,135 @@ class STTEngine:
         # VAD 디버그: 연속 에너지 로그 간격 (매 N청크마다 출력)
         _vad_log_every = 10   # 약 0.32초마다
         _vad_log_cnt   = 0
+        _mic_check_cnt = 0    # 마이크 스트림 체크 주기 카운터
 
         while self._running:
+          try:
+            # 마이크 스트림 상태 점검 (100 청크 ≈ 3.2초 간격)
+            _mic_check_cnt += 1
+            if (_mic_check_cnt % 100 == 0
+                    and self._stream is not None
+                    and self.wake_source != "browser"
+                    and not self._stream.active):
+                self.ensure_mic_stream()
+
+            raw = None
             try:
-                raw: bytes = await asyncio.wait_for(
+                raw = await asyncio.wait_for(
                     self._audio_queue.get(), timeout=0.5
                 )
             except asyncio.TimeoutError:
-                if self._state == STATE_LISTENING and self._listen_start:
-                    elapsed = time.time() - self._listen_start
-                    if elapsed > WAKE_LISTEN_SEC:
-                        logger.info("[STT] 명령 대기 타임아웃 → IDLE")
-                        self._d("DBG-WAKE",
-                                f"TIMEOUT | mode={self._wake_mode} | "
-                                f"listen_elapsed={elapsed:.2f}s → IDLE")
-                        self._state   = STATE_IDLE
-                        float_buf     = []
-                        silence_start = None
-                        speech_start  = None
-                        self._listen_start  = None
-                        if self.on_timeout:
-                            asyncio.create_task(self.on_timeout())
+                pass
+
+            # _force_idle()에서 설정한 리셋 신호 처리
+            if self._force_idle_flag:
+                self._force_idle_flag = False
+                float_buf     = []
+                silence_start = None
+                speech_start  = None
+                self._listen_start = None
+                continue
+
+            if raw is None:
                 continue
 
             now       = time.time()
             qsize     = self._audio_queue.qsize()
             pcm_int16 = np.frombuffer(raw, dtype=np.int16)
-            chunk_f32 = pcm_int16.astype(np.float32) / 32768.0
-            energy    = float(np.sqrt(np.mean(chunk_f32 ** 2)))
 
-            # ── 큐 백로그 경고 (디버그) ─────────────────────────────
-            if self.debug_mode and qsize > 5:
+            # ── 큐 백로그 경고 (디버그, 30초마다 최대 1회) ──────────
+            if self.debug_mode and qsize > 10:
                 self._d("DBG-QUEUE",
-                        f"⚠️  백로그 qsize={qsize} | state={self._state} "
-                        f"→ 처리 지연 발생 중", level="warning")
+                        f"⚠️  백로그 qsize={qsize} | state={self._state}",
+                        level="warning")
 
             # ════════════════════════
             # IDLE: Porcupine 감지
             # ════════════════════════
             if self._state == STATE_IDLE:
 
-                # 노이즈 프로파일 수집
+                # IDLE 큐 백로그 드레인: 밀린 청크가 많으면 최신 것만 유지
+                if qsize > 8:
+                    skipped = 0
+                    while self._audio_queue.qsize() > 2:
+                        try:
+                            self._audio_queue.get_nowait()
+                            skipped += 1
+                        except asyncio.QueueEmpty:
+                            break
+                    if skipped > 0:
+                        self._d("DBG-QUEUE",
+                                f"IDLE 백로그 드레인: {skipped}개 청크 스킵",
+                                level="info")
+                    continue  # 드레인 후 최신 청크로 재시작
+
+                # 노이즈 프로파일 수집 (float32 변환은 여기서만)
                 self._idle_chunk_cnt += 1
                 if self._idle_chunk_cnt % 16 == 0:
+                    chunk_f32 = pcm_int16.astype(np.float32) / 32768.0
                     self._collect_noise_profile(chunk_f32)
 
                 # 주기적 에너지 로그 (IDLE 중 배경음 레벨 확인용)
                 _vad_log_cnt += 1
                 if self.debug_mode and _vad_log_cnt % _vad_log_every == 0:
+                    chunk_f32 = pcm_int16.astype(np.float32) / 32768.0
+                    energy = float(np.sqrt(np.mean(chunk_f32 ** 2)))
                     self._d("DBG-VAD",
                             f"IDLE  energy={energy:.5f} | "
                             f"thresh={self.energy_threshold} | "
                             f"qsize={qsize}")
 
                 if self._detect_porcupine(pcm_int16) and not self._transcribing:
+                    # 웨이크 감지 후 밀린 큐 비우기 (이전 오디오는 버림)
+                    _wake_drain = 0
+                    while not self._audio_queue.empty():
+                        try:
+                            self._audio_queue.get_nowait()
+                            _wake_drain += 1
+                        except asyncio.QueueEmpty:
+                            break
+
                     self._state     = STATE_LISTENING
                     self._wake_mode = "porcupine"
-                    self._t_wake    = now
-                    self._listen_start    = now
+                    self._t_wake    = time.time()  # 드레인 후 시각
+                    self._listen_start    = self._t_wake
                     float_buf       = []
                     self._noise_frames = []
                     self._stats.wake_mode_counts["porcupine"] += 1
+                    self._start_listening_timeout()
 
                     logger.info(
                         f"[WAKE] ✅ Porcupine 감지! → LISTENING ({WAKE_LISTEN_SEC}초 대기)"
                     )
                     self._d("DBG-WAKE",
-                            f"✅ DETECTED | mode=porcupine | t={now:.3f} | "
-                            f"IDLE→LISTENING | noise_profile={'있음' if self._noise_profile is not None else '없음'}")
+                            f"✅ DETECTED | mode=porcupine | t={self._t_wake:.3f} | "
+                            f"IDLE→LISTENING | drained={_wake_drain} | "
+                            f"noise_profile={'있음' if self._noise_profile is not None else '없음'}")
 
                     if self.on_wake:
-                        asyncio.create_task(self.on_wake())
+                        try:
+                            await self.on_wake()
+                        except Exception as e:
+                            logger.error(f"[STT] on_wake 콜백 오류: {e}")
 
             # ════════════════════════
             # LISTENING: VAD 발화 수집
             # ════════════════════════
             elif self._state == STATE_LISTENING:
+                chunk_f32 = pcm_int16.astype(np.float32) / 32768.0
+                energy    = float(np.sqrt(np.mean(chunk_f32 ** 2)))
                 is_speech = energy > self.energy_threshold
                 listen_elapsed = now - self._listen_start if self._listen_start else 0
 
-                # VAD 상세 로그
-                if self.debug_mode:
+                # VAD 상세 로그 (5청크마다 ≈ 160ms 간격)
+                _vad_log_cnt += 1
+                if self.debug_mode and _vad_log_cnt % 5 == 0:
                     status_tag = "SPEECH" if is_speech else "SILENT"
                     sil_elapsed = (now - silence_start) if silence_start else 0
                     self._d("DBG-VAD",
                             f"LISTEN [{status_tag}] energy={energy:.5f} | "
-                            f"thresh={self.energy_threshold} | "
                             f"buf={len(float_buf)}chunks | "
-                            f"listen_elapsed={listen_elapsed:.2f}s | "
-                            f"sil_elapsed={sil_elapsed:.2f}s | "
+                            f"sil={sil_elapsed:.2f}s | "
                             f"qsize={qsize}")
 
                 if is_speech:
@@ -595,6 +728,7 @@ class STTEngine:
                                         f"🔇 발화 종료 | duration={duration:.2f}s | "
                                         f"audio_samples={len(audio)} | "
                                         f"sil_elapsed={sil_elapsed:.2f}s")
+                                self._cancel_listening_timeout()
                                 await self._transcribe(audio, speech_start)
                             else:
                                 logger.debug(
@@ -605,22 +739,14 @@ class STTEngine:
                                         f"min={VAD_MIN_SPEECH_MS}ms → filtered=too_short",
                                         level="warning")
                                 self._stats.filtered_short += 1
+                                self._cancel_listening_timeout()
+                                await self._notify_idle()
 
                             self._state   = STATE_IDLE
                             float_buf     = []
                             silence_start = None
                             speech_start  = None
                             self._listen_start  = None
-
-                    elif self._listen_start and listen_elapsed > WAKE_LISTEN_SEC:
-                        logger.info("[STT] 발화 없음 타임아웃 → IDLE")
-                        self._d("DBG-WAKE",
-                                f"TIMEOUT(no speech) | listen_elapsed={listen_elapsed:.2f}s → IDLE")
-                        self._state  = STATE_IDLE
-                        self._listen_start = None
-                        float_buf    = []
-                        if self.on_timeout:
-                            asyncio.create_task(self.on_timeout())
 
             # 최대 발화 길이 초과
             if (self._state == STATE_LISTENING
@@ -631,12 +757,28 @@ class STTEngine:
                 self._d("DBG-VAD",
                         f"⚠️  최대 발화 초과 | duration={now-speech_start:.1f}s → 강제 처리",
                         level="warning")
+                self._cancel_listening_timeout()
                 await self._transcribe(audio, speech_start)
                 self._state   = STATE_IDLE
                 float_buf     = []
                 silence_start = None
                 speech_start  = None
                 self._listen_start  = None
+
+          except asyncio.CancelledError:
+            raise
+          except Exception as e:
+            logger.error(f"[STT] _process_loop 예외 (복구): {e}", exc_info=True)
+            self._d("DBG-WAKE", f"⚠️ process_loop 예외: {e}", level="error")
+            # 상태 리셋 후 루프 계속
+            self._state = STATE_IDLE
+            float_buf = []
+            silence_start = None
+            speech_start = None
+            self._listen_start = None
+            self._transcribing = False
+            self._cancel_listening_timeout()
+            await asyncio.sleep(0.1)
 
     # ════════════════════════════════════════════
     # Porcupine 감지
@@ -723,17 +865,42 @@ class STTEngine:
     # Whisper 추론
     # ════════════════════════════════════════════
 
+    async def _notify_idle(self):
+        """전사 실패/필터링 시 클라이언트에 IDLE 복귀 알림"""
+        if self.on_timeout:
+            try:
+                await self.on_timeout()
+            except Exception as e:
+                logger.error(f"[STT] _notify_idle 오류: {e}")
+
     async def _transcribe(self, audio: np.ndarray, speech_start: Optional[float] = None):
         """오디오 → NR → Whisper → 정제 → 콜백 + 디버그 타임라인"""
-        # 동시 Whisper 실행 방지
-        if self._transcribing:
-            logger.warning("[STT] Whisper 추론 중 — 중복 요청 무시")
+        # 동시 Whisper 실행 방지 (Lock으로 원자적 체크+세팅)
+        async with self._lock:
+            if self._transcribing:
+                logger.warning("[STT] Whisper 추론 중 — 중복 요청 무시")
+                # Lock 해제 후 notify (Lock 내부에서 await 콜백 방지)
+                should_notify = True
+            else:
+                self._transcribing = True
+                should_notify = False
+        if should_notify:
+            await self._notify_idle()
             return
-        self._transcribing = True
         try:
             await self._do_transcribe(audio, speech_start)
         finally:
             self._transcribing = False
+            # pending_activate 처리: transcribe 완료 후 예약된 버튼 트리거 실행
+            if self._pending_activate:
+                self._pending_activate = False
+                logger.info("[STT] 예약된 버튼 트리거 실행 → activate()")
+                self.activate()
+                if self.on_wake:
+                    try:
+                        await self.on_wake()
+                    except Exception as e:
+                        logger.error(f"[STT] pending on_wake 콜백 오류: {e}")
 
     async def _do_transcribe(self, audio: np.ndarray, speech_start: Optional[float] = None):
         """_transcribe 내부 구현 (finally에서 _transcribing 해제 보장)"""
@@ -754,10 +921,12 @@ class STTEngine:
             )
         except asyncio.TimeoutError:
             logger.error("[STT] Whisper 추론 타임아웃 (30초 초과) → IDLE 복귀")
+            await self._notify_idle()
             return
         except Exception as e:
             logger.error(f"[STT] 추론 오류: {e}")
             self._d("DBG-STT", f"추론 오류: {e}", level="error")
+            await self._notify_idle()
             return
         raw_text, nr_ms, whisper_ms = result
         t1 = time.time()
@@ -780,9 +949,11 @@ class STTEngine:
                 self._stats.filtered_halluc += 1
             elif filter_reason == "wake_residual":
                 self._stats.filtered_wake += 1
+            await self._notify_idle()
             return
 
         if not clean_text:
+            await self._notify_idle()
             return
 
         self._d("DBG-STT", f"✅ 정제 결과='{clean_text}'")
@@ -891,6 +1062,9 @@ class STTEngine:
                 audio_nr,
                 language=self.language,
                 fp16=(self.device != "cpu"),
+                initial_prompt=_WHISPER_KO_PROMPT,
+                condition_on_previous_text=False,
+                no_speech_threshold=0.45,
             )
         except (RuntimeError, ValueError) as e:
             if "reshape" in str(e).lower() or "0 elements" in str(e):
@@ -941,7 +1115,8 @@ class STTEngine:
             "첨실": "침실", "침실실": "침실", "침숙": "침실",
             "욕시": "욕실", "요실": "욕실", "욕슬": "욕실",
             "현과": "현관", "현광": "현관", "현간": "현관",
-            "차그": "차고",
+            "차그": "차고", "자고": "차고",
+            "거심": "거실", "거싱": "거실",
             # 동사 오인식
             "켜죠": "켜줘", "켜주": "켜줘", "켜줘요": "켜줘",
             "켜져": "켜줘",
@@ -950,9 +1125,41 @@ class STTEngine:
             "열어죠": "열어줘", "열어줘요": "열어줘",
             "닫아죠": "닫아줘", "닫아줘요": "닫아줘",
             "알려죠": "알려줘", "알려줘요": "알려줘",
+            "바꿔죠": "바꿔줘", "바꿔주": "바꿔줘",
             # 기기명 오인식
             "잔든": "전등", "전든": "전등", "전댕": "전등",
+            "전등을": "전등", "전든을": "전등",
+            "커든": "커튼", "커턴": "커튼", "카튼": "커튼",
+            # 명령/모드 오인식
+            "눈": "문", "뭔": "문",
+            "못으로": "모드로", "못으": "모드",
+            "모들": "모드", "모듬": "모드",
+            "금지": "금지",  # 방해금지 → 유지
+            "방에": "방해", "반해": "방해", "방헤": "방해",
+            "양의": "방해", "망해": "방해",
+            "출모드로": "외출 모드로", "출모드": "외출 모드",
+            "외출모드로": "외출 모드로",
+            "방해금지모드로": "방해금지 모드로",
         }
+        # 구문 단위 교정 (2어절 이상 패턴)
+        _PHRASE_CORRECTIONS = {
+            "방에 금지": "방해금지",
+            "양의 금지": "방해금지",
+            "반해 금지": "방해금지",
+            "망해 금지": "방해금지",
+            "방헤 금지": "방해금지",
+            "왜 출": "외출",
+            "배 출": "외출",
+            "눈 닫아": "문 닫아",
+            "눈 열어": "문 열어",
+            "뭔 닫아": "문 닫아",
+            "뭔 열어": "문 열어",
+        }
+        for wrong, right in _PHRASE_CORRECTIONS.items():
+            if wrong in text:
+                text = text.replace(wrong, right)
+
+        # 단어 단위 교정
         words = text.split()
         corrected = " ".join(_KO_CORRECTIONS.get(w, w) for w in words)
         if corrected != text:

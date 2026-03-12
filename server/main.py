@@ -281,9 +281,11 @@ def create_app() -> FastAPI:
     stt_engine: STTEngine | None = None
     if not disable_stt:
         _stt = cfg.get("stt", {})
+        # on_wake에 stt_engine 참조 필요 → 생성 후 교체
+        _wake_placeholder = _make_wake_callback(ws_hub, tts_engine, stt_engine=None)
         stt_engine = STTEngine(
             on_result              = _make_stt_callback(command_router, ws_hub, tts_engine, db_logger),
-            on_wake                = _make_wake_callback(ws_hub, tts_engine),
+            on_wake                = _wake_placeholder,
             on_timeout             = _make_timeout_callback(ws_hub),
             model_size             = _stt.get("model_size", "base"),
             language               = _stt.get("language", "ko"),
@@ -299,6 +301,8 @@ def create_app() -> FastAPI:
             noise_prop_decrease    = _stt.get("noise_prop_decrease", 0.85),
             debug_mode             = _stt.get("debug_mode", False),
         )
+        # stt_engine 생성 완료 → on_wake 콜백에 stt_engine 참조 주입
+        stt_engine.on_wake = _make_wake_callback(ws_hub, tts_engine, stt_engine)
         logger.info(
             f"STTEngine 생성: model={_stt.get('model_size', 'base')} "
             f"wake_word={_stt.get('wake_word', '자비스야')} "
@@ -743,9 +747,12 @@ def _make_stt_callback(
     async def on_stt_result(text: str):
         import time
 
-        # TTS 재생 중 마이크 수음 방지 — 루프 차단
+        # TTS 재생 중 마이크 수음 방지 — 루프 차단 (클라이언트에 IDLE 복귀 알림)
         if tts_engine and tts_engine.is_speaking:
             logger.info(f"[STT] TTS 재생 중 — 입력 무시: '{text[:30]}'")
+            await ws_hub.broadcast(
+                '{"type":"wake_timeout","msg":"TTS 재생 중 — 입력 무시됨"}'
+            )
             return
 
         logger.info(f"[Pipeline] STT → '{text}'")
@@ -756,8 +763,9 @@ def _make_stt_callback(
                           detail={"text": text, "source": "stt_engine"})
 
         # WS 브로드캐스트: 인식된 텍스트 전달
+        import json as _json
         await ws_hub.broadcast(
-            f'{{"type":"stt_result","text":"{text}"}}'
+            _json.dumps({"type": "stt_result", "text": text}, ensure_ascii=False)
         )
 
         # CommandRouter → LLM 파싱 → ESP32 전송
@@ -802,12 +810,19 @@ def _extract_tts_response(result) -> str | None:
         return None
 
 
-def _make_wake_callback(ws_hub: WebSocketHub, tts_engine: TTSEngine | None = None):
-    """웨이크 워드 감지 콜백 — TTS 재생 중이면 즉시 중지"""
+def _make_wake_callback(
+    ws_hub: WebSocketHub,
+    tts_engine: TTSEngine | None = None,
+    stt_engine: STTEngine | None = None,
+):
+    """웨이크 워드 감지 콜백 — TTS 재생 중이면 즉시 중지 + 마이크 스트림 복구"""
     async def on_wake():
         if tts_engine and tts_engine.is_speaking:
             tts_engine.stop()
             logger.info("[Pipeline] 웨이크 워드 감지 → TTS 재생 중지")
+        # sd.stop() 글로벌 중단으로 마이크 스트림이 죽었을 수 있으므로 복구
+        if stt_engine:
+            stt_engine.ensure_mic_stream()
         logger.info("[Pipeline] 웨이크 워드 감지 → UI 알림")
         await ws_hub.broadcast(
             '{"type":"wake_detected","msg":"자비스야 감지됨 - 명령을 말씀하세요"}'

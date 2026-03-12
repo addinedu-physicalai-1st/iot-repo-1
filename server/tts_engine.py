@@ -45,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -126,6 +127,7 @@ class TTSEngine:
         self._lock        = asyncio.Lock()   # 동시 발화 방지
         self._available   = False
         self.is_speaking  = False            # TTS 재생 중 STT 뮤트용 플래그
+        self._stop_event  = threading.Event()  # stop() → executor 재생 중단 신호
 
     # ── 초기화 ──────────────────────────────────────────────────────
 
@@ -228,6 +230,7 @@ class TTSEngine:
             return
 
         async with self._lock:
+            self._stop_event.clear()
             self.is_speaking = True
             try:
                 logger.info(
@@ -240,11 +243,31 @@ class TTSEngine:
                     await self._speak_elevenlabs(text)
                 elif self.provider == TTSProvider.EDGE:
                     await self._speak_edge(text)
-                logger.info("[TTS] 발화 완료")
+                if not self._stop_event.is_set():
+                    logger.info("[TTS] 발화 완료")
             except Exception as e:
                 logger.error(f"[TTS] 발화 실패: {e}")
             finally:
                 self.is_speaking = False  # 예외 발생해도 반드시 해제
+
+    def _wait_or_stop(self):
+        """
+        sd.play() 재생 완료 대기 — stop() 호출 시 즉시 중단 (sd.wait() 대체)
+
+        sd.wait()는 내부 threading.Event 대기 → sd.stop() 호출 시 정상 해제되지만,
+        다른 스레드에서 sd.stop() 호출 시 PortAudio 동시접근 문제 발생 가능.
+        이 메서드는 같은 executor 스레드에서 sd.stop()을 호출하여 안전하게 중단.
+        """
+        import sounddevice as sd
+        # _stop_event 폴링: 50ms 간격으로 체크, set 되면 즉시 중단
+        while True:
+            if self._stop_event.wait(timeout=0.05):
+                sd.stop()
+                logger.info("[TTS] sd.stop() 호출 (executor 스레드 내)")
+                return
+            stream = sd.get_stream()
+            if stream is None or not stream.active:
+                return
 
     async def _speak_kokoro(self, text: str) -> None:
         import sounddevice as sd
@@ -259,10 +282,12 @@ class TTSEngine:
                 lang=self.lang,
             )
         )
-        await loop.run_in_executor(
-            None,
-            lambda: (sd.play(samples, sr), sd.wait())
-        )
+
+        def _play():
+            sd.play(samples, sr)
+            self._wait_or_stop()
+
+        await loop.run_in_executor(None, _play)
 
     async def _speak_elevenlabs(self, text: str) -> None:
         import sounddevice as sd
@@ -280,10 +305,12 @@ class TTSEngine:
         audio_bytes = b"".join(audio_gen)
         buf = io.BytesIO(audio_bytes)
         data, sr = sf.read(buf, dtype="float32")
-        await loop.run_in_executor(
-            None,
-            lambda: (sd.play(data, sr), sd.wait())
-        )
+
+        def _play():
+            sd.play(data, sr)
+            self._wait_or_stop()
+
+        await loop.run_in_executor(None, _play)
 
     async def _speak_edge(self, text: str) -> None:
         """
@@ -316,7 +343,7 @@ class TTSEngine:
         def _play():
             data, sr = sf.read(buf, dtype="float32")
             sd.play(data, sr)
-            sd.wait()
+            self._wait_or_stop()
 
         await loop.run_in_executor(None, _play)
 
@@ -326,14 +353,18 @@ class TTSEngine:
         """
         현재 TTS 재생을 즉시 중지.
         웨이크워드 '자비스야' 감지 시 호출됨.
+
+        _stop_event 설정 → executor 스레드의 _wait_or_stop()가 sd.stop() 호출
+        → sd.play()만 중단, STT RawInputStream은 영향 없음
         """
         if not self.is_speaking:
             return
         try:
-            import sounddevice as sd
-            sd.stop()
-            logger.info("[TTS] 재생 중지 (웨이크워드 감지)")
+            self._stop_event.set()
+            self.is_speaking = False
+            logger.info("[TTS] 재생 중지 요청 (웨이크워드 감지)")
         except Exception as e:
+            self.is_speaking = False
             logger.warning(f"[TTS] 재생 중지 실패: {e}")
 
     # ── 상태 확인 ────────────────────────────────────────────────────
