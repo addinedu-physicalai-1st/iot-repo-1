@@ -338,7 +338,7 @@ header {
   position: relative; min-width: 0; background: #020608;
   border-radius: 8px; overflow: hidden; aspect-ratio: 4/3; max-height: 220px;
 }
-.cam-stream-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-stream-wrap img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .cam-col-mid, .cam-col-right { display: flex; flex-direction: column; gap: 10px; justify-content: flex-start; }
 .cam-ts-box {
   display: flex; flex-direction: column; gap: 6px; padding: 12px;
@@ -666,7 +666,7 @@ header {
 .cam-alert-header h3 { flex:1; font-size:.95rem; color:var(--red); font-weight:600; }
 .cam-alert-conf { font-size:.65rem; color:#ff8080; }
 .cam-alert-snap { position:relative; background:#020608; aspect-ratio:4/3; max-height:260px; overflow:hidden; }
-.cam-alert-snap img { width:100%; height:100%; object-fit:cover; display:block; }
+.cam-alert-snap img { width:100%; height:100%; object-fit:contain; display:block; }
 .cam-alert-snap-ts { position:absolute; bottom:6px; right:8px; font-size:.6rem; color:#666; background:rgba(0,0,0,.6); padding:2px 6px; border-radius:2px; }
 .cam-alert-msg { padding:10px 18px; font-size:.75rem; color:#cc3040; letter-spacing:.04em; border-bottom:1px solid rgba(239,68,68,0.1); }
 .cam-alert-actions { display:flex; gap:8px; padding:12px 18px; }
@@ -683,7 +683,7 @@ header {
 .cctv-modal-title { font-size:1.1rem; font-weight:700; color:var(--red); letter-spacing:0.08em; display:flex; align-items:center; gap:8px; }
 .cctv-modal-time { font-size:0.65rem; color:var(--text2); }
 .cctv-feed { width:100%; aspect-ratio:16/9; background:#000; border-radius:8px; border:1px solid var(--border); overflow:hidden; position:relative; display:flex; align-items:center; justify-content:center; }
-.cctv-feed img { width:100%; height:100%; object-fit:cover; display:block; }
+.cctv-feed img { width:100%; height:100%; object-fit:contain; display:block; }
 .cctv-feed-error { font-size:0.75rem; color:var(--text2); text-align:center; display:none; flex-direction:column; align-items:center; gap:8px; }
 .cctv-feed-error.show { display:flex; }
 .cctv-modal-msg { font-size:0.75rem; color:var(--red); margin:12px 0 16px; background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.2); border-radius:6px; padding:8px 12px; }
@@ -1019,7 +1019,7 @@ header {
           </label>
         </div>
         <div class="servo-wrap">
-          <div class="servo-label"><span>커튼 각도 &nbsp;(0&deg;=닫힘 / 90&deg;=열림)</span><span id="servo-bedroom-val">0&deg;</span></div>
+          <div class="servo-label"><span>커튼 각도 &nbsp;(0&deg;=열림 / 90&deg;=닫힘)</span><span id="servo-bedroom-val">0&deg;</span></div>
           <input class="servo-slider" type="range" min="0" max="90" value="0"
             oninput="document.getElementById('servo-bedroom-val').textContent=this.value+'°'"
             onchange="sendCurtain(parseInt(this.value))">
@@ -1232,7 +1232,7 @@ header {
       <div id="monCamWrap" style="width:100%;aspect-ratio:16/9;max-height:45vh;background:rgba(0,0,0,0.3);border-radius:var(--radius-sm);display:grid;place-items:center;color:#94a3b8;font-size:0.9rem;border:1px solid rgba(255,255,255,0.06);position:relative;overflow:hidden;margin-bottom:10px;">
         <span class="cam-rec-dot" id="monCamRecDot" style="display:none;position:absolute;top:10px;left:10px;background:#ef4444;color:#fff;font-size:0.6rem;font-weight:700;padding:3px 10px;border-radius:6px;animation:pulse 2s infinite;">LIVE</span>
         <span id="monCamPh">ESP32-CAM Stream</span>
-        <img id="monCamStream" src="" alt="모니터링 카메라" style="display:none;width:100%;height:100%;object-fit:cover;position:absolute;inset:0;">
+        <img id="monCamStream" src="" alt="모니터링 카메라" style="display:none;width:100%;height:100%;object-fit:contain;position:absolute;inset:0;">
       </div>
       <div style="display:flex;gap:8px;">
         <button class="music-btn" onclick="camToggleStream()" style="flex:1;padding:9px;">Stream</button>
@@ -1283,7 +1283,7 @@ header {
         <div id="ccCamWrap" class="cc-cam-wrap" style="flex:1;width:100%;background:rgba(0,0,0,0.35);border-radius:var(--radius-sm);display:grid;place-items:center;color:#94a3b8;font-size:0.85rem;border:1px solid rgba(255,255,255,0.06);position:relative;overflow:hidden;margin-bottom:10px;">
           <span class="cam-rec-dot" id="ccCamRecDot" style="display:none;position:absolute;top:10px;left:10px;background:#ef4444;color:#fff;font-size:0.6rem;font-weight:700;padding:3px 10px;border-radius:6px;animation:pulse 2s infinite;">LIVE</span>
           <span id="ccCamPh">Camera Stream</span>
-          <img id="ccCamStream" src="" alt="CC 카메라" style="display:none;width:100%;height:100%;object-fit:cover;position:absolute;inset:0;">
+          <img id="ccCamStream" src="" alt="CC 카메라" style="display:none;width:100%;height:100%;object-fit:contain;position:absolute;inset:0;">
           <span style="position:absolute;bottom:8px;right:10px;font-size:0.65rem;color:rgba(255,255,255,0.5);font-variant-numeric:tabular-nums;z-index:1;" id="ccCamTime">--:--:--</span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
@@ -1966,12 +1966,14 @@ function updateSensor(device_id, temp, humidity, room) {
   if ((device_id === 'esp32_home' || device_id === 'esp32_home1') && room === 'bathroom') {
     if (temp != null) {
       document.getElementById('temp-bathroom').textContent = temp.toFixed(1);
+      document.getElementById('statTemp').textContent = temp.toFixed(1) + ' °C';
       _currentTemp = temp;
       updateHeatingActiveStyle();
     }
   }
   if (device_id === 'esp32_bathroom' && temp != null) {
     document.getElementById('temp-bathroom').textContent = temp.toFixed(1);
+    document.getElementById('statTemp').textContent = temp.toFixed(1) + ' °C';
     _currentTemp = temp;
     updateHeatingActiveStyle();
   }
@@ -2104,11 +2106,11 @@ function sendCurtain(angle) {
 
 function toggleCurtain() {
   const isOpen = (house.bedroom || {}).curtain;
-  sendCurtain(isOpen ? 0 : 90);
+  sendCurtain(isOpen ? 90 : 0);
 }
 
 function updateCurtainStatus(angle) {
-  const isOpen = angle >= 45;
+  const isOpen = angle < 45;
   const track  = document.getElementById('ts-bedroom-curtain');
   const val    = document.getElementById('ts-val-bedroom-curtain');
   if (track) track.className = isOpen ? 'ts-track open' : 'ts-track';
@@ -3727,16 +3729,35 @@ function camStreamUrl() {
   return _sgArmed ? '/camera/entrance/stream' : '/camera/entrance/raw';
 }
 
+// ── 카메라 스트림 탭 동기화 (단일 연결만 유지) ──
+// 현재 활성 탭의 img에만 MJPEG src를 설정하고 나머지는 해제 → 서버 부하 1/3
+function _camSyncMirrors() {
+  if (!_camStreaming) return;
+  var activeTab = document.querySelector('.tab-btn.active');
+  var tabId = activeTab ? activeTab.dataset.tab : 'devices';
+  var map = {
+    devices:  'camStream',
+    monitor:  'monCamStream',
+    command:  'ccCamStream'
+  };
+  var src = camStreamUrl() + '?' + Date.now();
+  Object.keys(map).forEach(function(tab) {
+    var el = document.getElementById(map[tab]);
+    if (!el) return;
+    if (tab === tabId) {
+      if (!el.src || el.style.display === 'none') {
+        el.src = src;
+        el.style.display = 'block';
+      }
+    } else {
+      el.src = '';
+      el.style.display = 'none';
+    }
+  });
+}
+
 function camRefreshStreamIfActive() {
-  if (_camStreaming) {
-    var src = camStreamUrl() + '?' + Date.now();
-    var img = document.getElementById('camStream');
-    if (img) img.src = src;
-    var m1 = document.getElementById('monCamStream');
-    var m2 = document.getElementById('ccCamStream');
-    if (m1 && m1.style.display !== 'none') m1.src = src;
-    if (m2 && m2.style.display !== 'none') m2.src = src;
-  }
+  if (_camStreaming) _camSyncMirrors();
 }
 let _camAlarmOsc  = null;
 let _audioCtx     = null;
@@ -3778,24 +3799,30 @@ function camToggleStream() {
     log('📷 현관 카메라 스트림 중지', 'warn');
   } else {
     var streamSrc = camStreamUrl() + '?' + Date.now();
-    ph.style.display  = 'none';
+    // 플레이스홀더 유지 — 실제 프레임 수신(onCamLoad) 시 숨김
     img.style.display = 'block';
     img.src = streamSrc;
     if (track) track.className = 'ts-track on';
     if (val)   { val.textContent = 'ON'; val.className = 'ts-val ts-val-on'; }
     if (snapBtn) snapBtn.disabled = false;
     mirrors.forEach(function(m) {
-      if (m.img) { m.img.src = streamSrc; m.img.style.display = 'block'; }
-      if (m.ph) m.ph.style.display = 'none';
       if (m.rec) m.rec.style.display = 'block';
     });
     _camStreaming = true;
+    _camSyncMirrors();
     showToast('📷 현관 카메라 스트림 연결 중...', 'cam', 2500);
     log('📷 현관 카메라 스트림 시작', 'info');
   }
 }
 
 function onCamLoad() {
+  // 실제 카메라 프레임 수신 — 플레이스홀더 숨기고 LIVE 표시
+  var ph = document.getElementById('camPlaceholder');
+  if (ph) ph.style.display = 'none';
+  var monPh = document.getElementById('monCamPh');
+  if (monPh) monPh.style.display = 'none';
+  var ccPh = document.getElementById('ccCamPh');
+  if (ccPh) ccPh.style.display = 'none';
   document.getElementById('camDot').className = 'cam-dot live';
   document.getElementById('camStatusText').textContent = 'LIVE';
   document.getElementById('camRecDot').classList.add('active');
@@ -3804,6 +3831,9 @@ function onCamLoad() {
 }
 
 function onCamError() {
+  // 연결 실패 — 플레이스홀더 복원
+  var ph = document.getElementById('camPlaceholder');
+  if (ph) ph.style.display = 'flex';
   document.getElementById('camDot').className = 'cam-dot offline';
   document.getElementById('camStatusText').textContent = '연결 실패';
   document.getElementById('camRecDot').classList.remove('active');
@@ -3837,11 +3867,25 @@ async function camSnapshot() {
 }
 
 // ── 판정 배지 업데이트 ───────────────────────
-function updateCamBadge(level, msg) {
+let _camBadgeTimer = null;
+function updateCamBadge(level, msg, autoHideSec) {
   const badge = document.getElementById('camVerdictBadge');
   badge.className   = 'cam-verdict-badge ' + level;
   badge.textContent = msg;
-  if (level === 'clear') setTimeout(() => { badge.className = 'cam-verdict-badge'; }, 3000);
+  if (_camBadgeTimer) { clearTimeout(_camBadgeTimer); _camBadgeTimer = null; }
+  // clear: 3초, known/delivery: 5초 후 자동 숨김, intruder: 수동 해제
+  var hide = autoHideSec != null ? autoHideSec
+           : level === 'clear' ? 3
+           : level === 'known' ? 5
+           : level === 'delivery' ? 5
+           : 0;
+  if (hide > 0) {
+    _camBadgeTimer = setTimeout(function() {
+      badge.className = 'cam-verdict-badge';
+      badge.textContent = '';
+      _camBadgeTimer = null;
+    }, hide * 1000);
+  }
 }
 
 // ── cam_alert 처리 (intruder / delivery) ─────
@@ -4297,6 +4341,7 @@ async function btSpFetchStatus() {
     document.getElementById('btSpWifi').textContent = '-';
     document.getElementById('btSpBt').textContent = '-';
     document.getElementById('btSpTrackName').textContent = '연결 안됨';
+    document.getElementById('statMusic').textContent = '--';
     _btSpeakerOnline = false; updateStatDevices();
     return;
   }
@@ -4324,7 +4369,9 @@ async function btSpFetchStatus() {
   }
 
   // Track name
-  document.getElementById('btSpTrackName').textContent = d.current_title || d.title || (d.streaming ? '재생 중' : '대기 중');
+  const trackName = d.current_title || d.title || (d.streaming ? '재생 중' : '대기 중');
+  document.getElementById('btSpTrackName').textContent = trackName;
+  document.getElementById('statMusic').textContent = d.streaming ? trackName : '--';
 
   // Volume sync (only if user not dragging)
   if (d.volume !== undefined && document.activeElement?.id !== 'btSpVol') {
@@ -4507,6 +4554,8 @@ document.addEventListener('DOMContentLoaded', () => { setTimeout(btSpStartPollin
       if (p) p.classList.add('active');
       // Redraw house maps after tab switch
       setTimeout(function() { drawAllHouses(); }, 50);
+      // 카메라 스트림: 활성 탭에만 MJPEG 연결 유지
+      setTimeout(function() { if (typeof _camSyncMirrors === 'function') _camSyncMirrors(); }, 100);
     });
   });
 

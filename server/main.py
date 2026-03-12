@@ -129,6 +129,7 @@ logger = logging.getLogger(__name__)
 # 원인 확인 후 아래 두 줄 제거
 logging.getLogger("server.command_router").setLevel(logging.DEBUG)
 logging.getLogger("server.camera_stream").setLevel(logging.DEBUG)
+logging.getLogger("server.frame_analyzer").setLevel(logging.DEBUG)
 
 
 # ─────────────────────────────────────────────
@@ -472,15 +473,6 @@ def create_app() -> FastAPI:
             cam_mod.set_security_mode_fn(_get_security_mode)
             logger.info("[CAM] 보안모드 콜백 연동 완료 (command_router → camera_stream)")
 
-            # 분석 루프 asyncio task
-            analysis_task = asyncio.create_task(
-                cam_mod.analysis_loop(
-                    ws_broadcast_fn=ws_hub.broadcast,
-                    tts_fn=_tts_speak,
-                )
-            )
-            logger.info("[CAM] analysis_loop task 시작")
-
         # ── v0.9: SmartGate 시작 ─────────────────────────────────────
         if smartgate_manager is not None:
             import server.camera_stream as _cam_ref
@@ -489,10 +481,21 @@ def create_app() -> FastAPI:
             logger.info("[SmartGate] SmartGateManager 시작 완료")
 
             # v1.1: frame_analyzer에 face_auth 주입 (얼굴 DB 통합)
-            # → encodings.pkl 포맷 충돌 해소, 인식 결과 일관성 보장
+            # → 동일 인스턴스를 analysis_loop에서도 사용하므로 인식 결과 일관성 보장
             if frame_analyzer is not None:
                 frame_analyzer.set_face_auth(smartgate_manager.face_auth)
                 logger.info("[CAM] frame_analyzer ← SmartGate face_auth 연동 완료")
+
+        if not disable_cam:
+            # 분석 루프 asyncio task (frame_analyzer 인스턴스 공유)
+            analysis_task = asyncio.create_task(
+                cam_mod.analysis_loop(
+                    ws_broadcast_fn=ws_hub.broadcast,
+                    tts_fn=_tts_speak,
+                    analyzer=frame_analyzer,
+                )
+            )
+            logger.info("[CAM] analysis_loop task 시작")
 
         logger.info("=" * 50)
         logger.info("서버 준비 완료 - 요청 대기 중")

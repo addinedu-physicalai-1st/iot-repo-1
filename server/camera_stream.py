@@ -418,6 +418,12 @@ def _udp_multipart_receiver():
                 _frame_queue.append((frame_count, jpeg_bytes))
                 frame_count += 1
 
+                # SmartGate 프레임 공급 (UDP 스레드에서 직접 — analysis_loop 블로킹 무관)
+                if _smartgate_manager is not None and frame_count % SMARTGATE_EVERY == 0:
+                    _sg_frame = _decode_frame(jpeg_bytes)
+                    if _sg_frame is not None:
+                        _smartgate_manager.push_frame(_sg_frame)
+
                 # 손실률 계산 (frame_id 갭 기반)
                 if last_seen_frame_id is not None and frame_id > last_seen_frame_id + 1:
                     lost = frame_id - last_seen_frame_id - 1
@@ -471,7 +477,7 @@ def _udp_multipart_receiver():
 # ──────────────────────────────────────────
 # 분석 루프 (비동기 — asyncio task)
 # ──────────────────────────────────────────
-async def analysis_loop(ws_broadcast_fn, tts_fn=None):
+async def analysis_loop(ws_broadcast_fn, tts_fn=None, analyzer=None):
     """
     매 ANALYZE_EVERY 프레임마다 frame_analyzer 호출
     verdict에 따라 WS 브로드캐스트 + TTS 트리거
@@ -482,12 +488,16 @@ async def analysis_loop(ws_broadcast_fn, tts_fn=None):
     Args:
         ws_broadcast_fn: async fn(dict) — websocket_hub.broadcast
         tts_fn:          async fn(str)  — tts_engine.speak (optional)
+        analyzer:        FrameAnalyzer  — 외부에서 생성된 인스턴스 (None 시 내부 생성)
     """
-    from server.frame_analyzer import FrameAnalyzer
-
-    analyzer = FrameAnalyzer()
-    await analyzer.load()
-    logger.info("[CameraStream] FrameAnalyzer 로드 완료")
+    if analyzer is None:
+        from server.frame_analyzer import FrameAnalyzer
+        analyzer = FrameAnalyzer()
+    if not analyzer._loaded:
+        await analyzer.load()
+        logger.info("[CameraStream] FrameAnalyzer 로드 완료")
+    else:
+        logger.info("[CameraStream] FrameAnalyzer 이미 로드됨 (외부 인스턴스 재사용)")
 
     last_analyzed = -1
     last_smartgate_frame = -1   # v1.6: SmartGate 마지막 공급 프레임 번호
@@ -798,10 +808,12 @@ async def mjpeg_generator():
 # → /camera/entrance/raw 에서 사용
 # ──────────────────────────────────────────
 async def mjpeg_raw_generator():
-    """원본 JPEG을 재인코딩 없이 MJPEG으로 전송 — 지연 최소"""
+    """원본 JPEG을 재인코딩 없이 MJPEG으로 전송 — 지연 최소
+    플레이스홀더 미전송: 실제 카메라 프레임이 수신될 때까지 대기
+    → 브라우저 onload는 실제 프레임 수신 시에만 발생 (false LIVE 방지)
+    """
     interval    = 1.0 / STREAM_FPS_LIMIT
     last_sent   = None
-    placeholder = _make_placeholder()
 
     while True:
         await asyncio.sleep(interval)
@@ -810,10 +822,6 @@ async def mjpeg_raw_generator():
             jpeg_bytes = _latest_frame
 
         if jpeg_bytes is None:
-            yield (b"--frame\r\n"
-                   b"Content-Type: image/jpeg\r\n\r\n" +
-                   placeholder + b"\r\n")
-            await asyncio.sleep(1.0)
             continue
 
         if jpeg_bytes is last_sent:

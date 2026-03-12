@@ -108,7 +108,7 @@ class FrameAnalyzer:
                 name="buffalo_sc",          # 경량 모델 (buffalo_l: 고정확도)
                 providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
             )
-            self._face_app.prepare(ctx_id=0, det_size=(320, 320))
+            self._face_app.prepare(ctx_id=0, det_size=(640, 640))
             logger.info("[FrameAnalyzer] InsightFace 로드 완료")
         except Exception as e:
             logger.error(f"[FrameAnalyzer] InsightFace 로드 실패: {e}")
@@ -263,6 +263,10 @@ class FrameAnalyzer:
                 sims = np.dot(known_mat, embedding)
                 best_idx = int(np.argmax(sims))
                 best_sim = float(sims[best_idx])
+                logger.debug(
+                    f"[FrameAnalyzer] 얼굴 매칭: best={fa.known_names[best_idx]} "
+                    f"sim={best_sim:.3f} / threshold={fa.tolerance}"
+                )
                 if best_sim >= fa.tolerance:
                     confidence = best_sim  # 0~1 범위 코사인 유사도
                     return fa.known_names[best_idx], round(confidence, 3)
@@ -382,32 +386,24 @@ class FrameAnalyzer:
                 })
 
         # ── STEP 2: InsightFace 얼굴인식 ────
-        # primary person 영역으로 크롭 → 해당 인물 얼굴에 집중
+        # 전체 프레임에서 얼굴 감지 (저해상도 ESP-CAM 크롭 시 감지 실패 방지)
         matched_name = None
         best_conf    = 0.0
         face_unknown = False
         face_detected = False    # v1.2: 얼굴 bbox 표시 여부 추적
 
         if self._face_app is not None:
-            # 크롭 영역 (여백 10% 추가, 프레임 경계 클리핑)
-            h_frame, w_frame = frame.shape[:2]
-            pad_x = int(pw * 0.10)
-            pad_y = int(ph * 0.10)
-            x1c = max(0, px - pad_x)
-            y1c = max(0, py - pad_y)
-            x2c = min(w_frame, px + pw + pad_x)
-            y2c = min(h_frame, py + ph + pad_y)
-            crop = frame[y1c:y2c, x1c:x2c]
+            faces = self._face_app.get(frame)
+            logger.debug(f"[FrameAnalyzer] InsightFace 감지: {len(faces)}개 얼굴 | frame={frame.shape[1]}×{frame.shape[0]}")
+            # 가장 큰 얼굴 우선 매칭 (ESP-CAM 저해상도 — 보통 1명)
+            faces_sorted = sorted(faces, key=lambda f: (f.bbox[3]-f.bbox[1])*(f.bbox[2]-f.bbox[0]), reverse=True)
+            for face in faces_sorted:
+                bb = face.bbox.astype(int)
+                fx1, fy1, fx2, fy2 = bb[0], bb[1], bb[2], bb[3]
 
-            faces = self._face_app.get(crop)
-            for face in faces:
                 emb  = face.normed_embedding
                 name, conf = self._match_face(emb)
 
-                # 크롭 좌표 → 원본 프레임 좌표로 변환
-                bb = face.bbox.astype(int)
-                fx1, fy1, fx2, fy2 = (bb[0] + x1c, bb[1] + y1c,
-                                      bb[2] + x1c, bb[3] + y1c)
                 bbox_list.append({
                     "x": fx1, "y": fy1,
                     "w": fx2 - fx1, "h": fy2 - fy1,

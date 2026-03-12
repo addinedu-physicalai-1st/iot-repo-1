@@ -77,7 +77,7 @@ tts:
 stt:
   model_size: "base"
   language: "ko"
-  device: "cpu"
+  device: "cuda"
   wake_word: "자비스야"
   # wake_source: "browser" → 웨이크워드 브라우저 마이크 | "server" → 서버 마이크 (자비스야 미작동 시 server로 변경)
   wake_source: "server"
@@ -169,7 +169,7 @@ devices:
 # ================================================================
 camera:
   udp_port: 5005          # ESP32-CAM이 보내는 UDP 포트 (esp32_cam.ino SERVER_PORT와 동일)
-  multipart: true         # 항상 멀티파트 모드 사용 (MAGIC 헤더 + 조각 전송)
+  multipart: true         # 멀티파트 모드 (MAGIC 헤더 + 조각 전송)
   analyze_every: 10       # 매 N 프레임마다 분석 (키우면 CPU·지연↓, 예: 20)
   # v2.2: UDP IP 화이트리스트 (MEDIUM-5 보안 조치)
   # 비인가 IP 패킷 차단 — ESP32-CAM IP 변경 시 이 목록만 수정 후 서버 재시작
@@ -231,8 +231,8 @@ smartgate:
 
   face_auth:
     model_name: "buffalo_sc"
-    tolerance: 0.40
-    min_face_size: 80
+    tolerance: 0.35
+    min_face_size: 60
 
   liveness:
     active_profile: "espcam"   # ← ESP-CAM 연결 시 "espcam" / 노트북 테스트 시 "laptop"
@@ -257,7 +257,7 @@ smartgate:
         timeout_sec: 12.0               # v1.2: 20→12 (VGA 업그레이드 반영, 적정 대기)
         blink_ear_thresh: 0.25           # v1.2: 추가 (저해상도 EAR 노이즈 보상)
         blink_consec_frames: 1
-        yaw_threshold: 0.10              # v1.2: 0.12→0.10 (작은 움직임도 감지)
+        yaw_threshold: 0.07              # ESP-CAM 저해상도 보정 (0.10→0.07)
         nod_threshold: 0.06              # v1.2: 추가 (풀 확장 대비)
         mouth_mar_thresh: 0.35           # v1.2: 추가 (풀 확장 대비)
         mouth_consec_frames: 1           # v1.2: 추가
